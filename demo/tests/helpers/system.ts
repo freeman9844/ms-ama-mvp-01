@@ -6,12 +6,22 @@ import { once } from "node:events";
 import { z } from "zod";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
+import { randomBytes } from "node:crypto";
+import { createMockApp } from "../../src/mock/server.js";
+import { openSourceDb } from "../../src/mock/seed.js";
 
 export async function startTestSystem() {
   const directory = await mkdtemp(join(tmpdir(), "capstone-test-"));
   const db = openDb(join(directory, "app.db"));
-  const clock = { now: () => new Date("2026-10-28T00:00:00+09:00") };
-  const options = { db, clock, origin: "" };
+  let now = new Date("2026-10-28T00:00:00+09:00");
+  const clock = {
+    now: () => new Date(now),
+    set: (value: Date) => {
+      now = value;
+    },
+  };
+  const serviceToken = randomBytes(32).toString("hex");
+  const options = { db, clock, origin: "", serviceToken };
   const server = createServer(createApp(options));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -19,6 +29,20 @@ export async function startTestSystem() {
   if (!address || typeof address === "string") throw new Error("Missing test server port");
   const url = `http://127.0.0.1:${address.port}`;
   options.origin = url;
+  const sourceDb = openSourceDb(join(directory, "source.db"));
+  const mockServer = createServer(
+    createMockApp({
+      db: sourceDb,
+      clock,
+      serviceToken,
+      appUrl: url,
+    }),
+  );
+  mockServer.listen(0, "127.0.0.1");
+  await once(mockServer, "listening");
+  const mockAddress = mockServer.address();
+  if (!mockAddress || typeof mockAddress === "string") throw new Error("Missing mock port");
+  const mockUrl = `http://127.0.0.1:${mockAddress.port}`;
   const sessions = new Map<string, { cookie: string; csrf: string }>();
   const raw = (
     method: string,
@@ -35,6 +59,21 @@ export async function startTestSystem() {
     db,
     url,
     clock,
+    serviceToken,
+    mockUrl,
+    sourceDb,
+    sourceRequest(source: string, query: unknown, cursor: string | null) {
+      const paths: Record<string, string> = {
+        BANK: "/v1/bank/transactions",
+        PG: "/v1/pg/settlements",
+        TAX: "/v1/tax/documents",
+      };
+      const search = new URLSearchParams({ query: JSON.stringify(query) });
+      if (cursor) search.set("cursor", cursor);
+      return fetch(`${mockUrl}${paths[source]}?${search}`, {
+        headers: { authorization: `Bearer ${serviceToken}` },
+      });
+    },
     raw,
     async request(
       account: string,
@@ -62,6 +101,11 @@ export async function startTestSystem() {
       return { status: response.status, body: result };
     },
     async close() {
+      mockServer.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        mockServer.close((error) => (error ? reject(error) : resolve()));
+      });
+      sourceDb.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

@@ -3,11 +3,13 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Clock } from "../domain/clock.js";
 import { authentication, context, login, requireRole } from "./auth.js";
 import { DomainError, errorHandler } from "./errors.js";
+import { consentRoutes, internalConsentRoutes } from "./routes/consents.js";
 
 export type ServerOptions = {
   db: DatabaseSync;
   clock: Clock;
   origin: string;
+  serviceToken: string;
 };
 
 export function createApp(options: ServerOptions) {
@@ -19,7 +21,11 @@ export function createApp(options: ServerOptions) {
     if (req.get("content-encoding") && req.get("content-encoding") !== "identity") {
       return next(new DomainError("COMPRESSED_REQUEST_REJECTED", 415));
     }
-    if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && req.get("origin") !== options.origin) {
+    if (
+      !req.path.startsWith("/internal/") &&
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      req.get("origin") !== options.origin
+    ) {
       return next(new DomainError("ORIGIN_REJECTED", 403));
     }
     next();
@@ -28,12 +34,14 @@ export function createApp(options: ServerOptions) {
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
+  internalConsentRoutes(app, options);
   app.post("/api/demo-login", (req, res) => {
     const session = login(options.db, req.body);
     res.cookie("demo_session", session.id, { httpOnly: true, sameSite: "strict", path: "/" });
     res.json({ actor: session.actor, csrf: session.csrf });
   });
   app.use("/api", authentication(options.db));
+  consentRoutes(app, options);
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });

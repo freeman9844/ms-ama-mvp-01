@@ -21,3 +21,10 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS consents (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  version INTEGER NOT NULL DEFAULT 1
+);

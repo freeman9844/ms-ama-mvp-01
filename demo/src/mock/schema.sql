@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS source_records (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS source_state (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  version INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO source_state VALUES (1, 1);
+CREATE TABLE IF NOT EXISTS source_events (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL
+);

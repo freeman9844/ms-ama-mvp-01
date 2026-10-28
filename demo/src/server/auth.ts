@@ -18,6 +18,21 @@ export function requireRole(actor: Actor, roles: readonly Role[]): void {
   if (!roles.includes(actor.role)) throw new DomainError("FORBIDDEN", 403);
 }
 
+export function serviceAuthentication(token: string): RequestHandler {
+  return (req, _res, next) => {
+    const value = req.get("authorization") ?? "";
+    const expected = `Bearer ${token}`;
+    if (
+      !token ||
+      Buffer.byteLength(value) !== Buffer.byteLength(expected) ||
+      !timingSafeEqual(Buffer.from(value), Buffer.from(expected))
+    ) {
+      return next(new DomainError("SERVICE_UNAUTHENTICATED", 401));
+    }
+    next();
+  };
+}
+
 export function context(req: Request): Session {
   const session = sessions.get(req);
   if (!session) throw new DomainError("UNAUTHENTICATED", 401);
