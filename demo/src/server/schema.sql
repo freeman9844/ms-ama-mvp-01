@@ -144,3 +144,53 @@ CREATE TABLE IF NOT EXISTS repayment_schedules (
   status TEXT NOT NULL,
   version INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS demo_events (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  state TEXT NOT NULL,
+  error_code TEXT
+);
+CREATE TABLE IF NOT EXISTS alerts (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES applications(id),
+  dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  code TEXT NOT NULL,
+  state TEXT NOT NULL,
+  minimum_krw INTEGER NOT NULL,
+  explanation_status TEXT NOT NULL,
+  explanation TEXT,
+  error_code TEXT,
+  UNIQUE(application_id, fingerprint, code)
+);
+CREATE TABLE IF NOT EXISTS support_requests (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES applications(id),
+  business_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  route TEXT,
+  status TEXT NOT NULL,
+  explanation TEXT,
+  error_code TEXT
+);
+CREATE TABLE IF NOT EXISTS support_reviews (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES support_requests(id),
+  actor_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mock_messages (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES support_requests(id),
+  application_id TEXT NOT NULL REFERENCES applications(id),
+  template TEXT NOT NULL,
+  text TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  state TEXT NOT NULL,
+  reason TEXT,
+  UNIQUE(request_id, template)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS message_daily_limit
+  ON mock_messages(application_id,business_date) WHERE state='SENT';

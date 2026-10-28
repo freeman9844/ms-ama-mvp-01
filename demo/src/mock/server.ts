@@ -12,12 +12,14 @@ import {
 } from "../domain/contracts.js";
 import { serviceAuthentication } from "../server/auth.js";
 import { DomainError, errorHandler, handler } from "../server/errors.js";
+import { applySourceEvent } from "./events.js";
 
 export type MockOptions = {
   db: DatabaseSync;
   clock: Clock;
   serviceToken: string;
   appUrl: string;
+  setTime?: (date: Date) => void;
 };
 export function createMockApp(options: MockOptions) {
   const app = express();
@@ -26,6 +28,8 @@ export function createMockApp(options: MockOptions) {
     res.json({ status: "ok" });
   });
   app.use(serviceAuthentication(options.serviceToken));
+  app.use(express.json({ limit: "32kb", inflate: false }));
+  app.post("/internal/events", (req, res) => res.json(applySourceEvent(options, req.body)));
   const paths: Record<Source, string> = {
     BANK: "/v1/bank/transactions",
     PG: "/v1/pg/settlements",
@@ -38,6 +42,10 @@ export function createMockApp(options: MockOptions) {
         const query = consentQuerySchema.parse(JSON.parse(z.string().parse(req.query.query)));
         if (source !== query.source) throw new DomainError("SOURCE_MISMATCH", 400);
         await checkConsent(options, query);
+        const fault = options.db
+          .prepare("UPDATE source_faults SET remaining=remaining-1 WHERE source=? AND remaining>0")
+          .run(source);
+        if (fault.changes) throw new DomainError("SOURCE_UNAVAILABLE", 503);
         const version = z
           .object({ version: z.number() })
           .parse(options.db.prepare("SELECT version FROM source_state WHERE id=1").get()).version;

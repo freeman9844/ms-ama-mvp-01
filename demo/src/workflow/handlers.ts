@@ -1,5 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Clock } from "../domain/clock.js";
+import { daysBetween } from "../domain/clock.js";
+import type { Job } from "./queue.js";
+import type { Purpose } from "../domain/contracts.js";
 import type { JobHandler } from "./runner.js";
 import { z } from "zod";
 import { collect } from "../agents/assembly.js";
@@ -49,57 +52,75 @@ export function createAssembler(
   token: string,
 ): JobHandler {
   return async (job, signal) => {
-    if (!job.applicationId) throw new DomainError("APPLICATION_REQUIRED", 400);
-    const queries = job.consentIds.map((id) => {
-      const row = z
-        .object({ payload: z.string() })
-        .parse(db.prepare("SELECT payload FROM consents WHERE id=?").get(id));
-      const consent = consentInputSchema.parse(JSON.parse(row.payload));
-      return consentQuerySchema.parse({
-        ...consent,
-        consentId: id,
-        businessId: job.businessId,
-        to:
-          consent.source === "BANK"
-            ? new Date(Math.min(Date.parse(consent.to), clock.now().getTime())).toISOString()
-            : consent.to,
-      });
-    });
-    const createdAt = z
-      .object({ created_at: z.string() })
-      .parse(
-        db.prepare("SELECT created_at FROM applications WHERE id=?").get(job.applicationId),
-      ).created_at;
-    const elapsed = Math.floor((clock.now().getTime() - Date.parse(createdAt)) / 86_400_000);
-    const scheduledFlows: ScheduledFlow[] = [
-      {
-        id: "payroll",
-        day: Math.max(0, 5 - elapsed),
-        amountKrw: -6_000_000,
-        certainty: elapsed <= 5 ? "CONFIRMED" : "UNKNOWN",
-      },
-      {
-        id: "loan",
-        day: Math.max(0, 10 - elapsed),
-        amountKrw: -1_000_000,
-        certainty: elapsed <= 10 ? "CONFIRMED" : "UNKNOWN",
-      },
-    ];
+    const input = assemblyInput(db, clock, job, "ASSESSMENT");
     db.prepare("UPDATE applications SET status='COLLECTING' WHERE id=?").run(job.applicationId);
-    const ref = await collect(
-      db,
-      clock,
-      createSourceClient(sourceUrl, token, signal),
-      {
-        job,
-        applicationId: job.applicationId,
-        businessId: job.businessId,
-        purpose: "ASSESSMENT",
-        queries,
-        scheduledFlows,
-      },
-      signal,
-    );
-    return ref.id;
+    return (await collect(db, clock, createSourceClient(sourceUrl, token, signal), input, signal))
+      .id;
+  };
+}
+
+export function assemblyInput(db: DatabaseSync, clock: Clock, job: Job, purpose: Purpose) {
+  if (!job.applicationId) throw new DomainError("APPLICATION_REQUIRED", 400);
+  const queries = job.consentIds.map((id) => {
+    const row = z
+      .object({ payload: z.string() })
+      .parse(db.prepare("SELECT payload FROM consents WHERE id=?").get(id));
+    const consent = consentInputSchema.parse(JSON.parse(row.payload));
+    return consentQuerySchema.parse({
+      ...consent,
+      consentId: id,
+      businessId: job.businessId,
+      to:
+        consent.source === "BANK"
+          ? new Date(Math.min(Date.parse(consent.to), clock.now().getTime())).toISOString()
+          : consent.to,
+    });
+  });
+  const createdAt = z
+    .object({ created_at: z.string() })
+    .parse(
+      db.prepare("SELECT created_at FROM applications WHERE id=?").get(job.applicationId),
+    ).created_at;
+  const elapsed = daysBetween(new Date(createdAt), clock.now());
+  const scheduledFlows: ScheduledFlow[] = [
+    {
+      id: "payroll",
+      day: Math.max(0, 5 - elapsed),
+      amountKrw: -6_000_000,
+      certainty: elapsed <= 5 ? "CONFIRMED" : "UNKNOWN",
+    },
+    {
+      id: "loan",
+      day: Math.max(0, 10 - elapsed),
+      amountKrw: -1_000_000,
+      certainty: elapsed <= 10 ? "CONFIRMED" : "UNKNOWN",
+    },
+  ];
+  if (purpose === "MONITORING") {
+    scheduledFlows.pop();
+    for (const raw of db
+      .prepare(
+        "SELECT s.* FROM repayment_schedules s JOIN loans l ON l.id=s.loan_id WHERE l.application_id=? AND s.status<>'PAID'",
+      )
+      .all(job.applicationId)) {
+      const schedule = z
+        .object({ id: z.string(), due_at: z.string(), amount_krw: z.number() })
+        .parse(raw);
+      const day = daysBetween(clock.now(), new Date(schedule.due_at));
+      scheduledFlows.push({
+        id: schedule.id,
+        day: Math.max(0, day),
+        amountKrw: -schedule.amount_krw,
+        certainty: day >= 0 ? "CONFIRMED" : "UNKNOWN",
+      });
+    }
+  }
+  return {
+    job,
+    applicationId: job.applicationId,
+    businessId: job.businessId,
+    purpose,
+    queries,
+    scheduledFlows,
   };
 }

@@ -13,3 +13,9 @@ CREATE TABLE IF NOT EXISTS source_events (
   id TEXT PRIMARY KEY,
   payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS source_faults (
+  source TEXT PRIMARY KEY,
+  remaining INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT OR IGNORE INTO settings VALUES ('generation','1');

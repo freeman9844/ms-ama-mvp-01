@@ -1,7 +1,7 @@
 import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import type { Clock } from "../domain/clock.js";
-import { authentication, context, login, requireRole } from "./auth.js";
+import { authentication, context, login } from "./auth.js";
 import { DomainError, errorHandler } from "./errors.js";
 import { consentRoutes, internalConsentRoutes } from "./routes/consents.js";
 import type { AiPort } from "../copilot/port.js";
@@ -9,6 +9,8 @@ import { aiRoutes } from "./routes/ai.js";
 import { applicationRoutes } from "./routes/applications.js";
 import { jobRoutes } from "./routes/jobs.js";
 import { reviewRoutes } from "./routes/review.js";
+import { eventRoutes } from "./routes/events.js";
+import { supportRoutes } from "./routes/support.js";
 
 export type ServerOptions = {
   db: DatabaseSync;
@@ -16,6 +18,8 @@ export type ServerOptions = {
   origin: string;
   serviceToken: string;
   ai?: AiPort;
+  sourceUrl?: string;
+  setTime?: (date: Date) => void;
 };
 
 export function createApp(options: ServerOptions) {
@@ -52,6 +56,8 @@ export function createApp(options: ServerOptions) {
   applicationRoutes(app, options);
   jobRoutes(app, options);
   reviewRoutes(app, options);
+  eventRoutes(app, options);
+  supportRoutes(app, options);
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });
@@ -60,10 +66,6 @@ export function createApp(options: ServerOptions) {
     options.db.prepare("DELETE FROM sessions WHERE id = ?").run(context(req).id);
     res.clearCookie("demo_session", { path: "/" });
     res.status(204).end();
-  });
-  app.post("/api/demo/events", (req, _res) => {
-    requireRole(context(req).actor, ["OPERATOR"]);
-    throw new DomainError("NOT_IMPLEMENTED", 501);
   });
   app.use((_req, _res, next) => {
     next(new DomainError("NOT_FOUND", 404));

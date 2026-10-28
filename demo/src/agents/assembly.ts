@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Clock } from "../domain/clock.js";
+import { daysBetween } from "../domain/clock.js";
 import {
   sourcePageSchema,
   sourceRecordSchema,
@@ -81,6 +82,7 @@ export async function collect(
       const page = sourcePageSchema.parse(await source.page(query, cursor));
       if (!first) first = page;
       if (
+        page.asOf !== asOf ||
         page.snapshotId !== first.snapshotId ||
         page.asOf !== first.asOf ||
         page.totalCount !== first.totalCount ||
@@ -130,7 +132,7 @@ export async function collect(
   const flows = [...input.scheduledFlows];
   for (const row of records) {
     if (row.kind !== "PG" || row.status === "PAID") continue;
-    const day = Math.floor((Date.parse(row.dueAt) - Date.parse(asOf)) / 86_400_000);
+    const day = daysBetween(new Date(asOf), new Date(row.dueAt));
     flows.push({
       id: row.id,
       day: Math.max(0, day),
@@ -146,6 +148,7 @@ export async function collect(
     0,
   );
   signal.throwIfAborted();
+  if (clock.now().toISOString() !== asOf) throw new DomainError("SOURCE_SNAPSHOT_CHANGED", 409);
   db.exec("BEGIN IMMEDIATE");
   try {
     assertJob(db, input.job, clock.now());

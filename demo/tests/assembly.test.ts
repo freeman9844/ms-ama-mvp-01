@@ -149,3 +149,23 @@ it("수집 중 동의 철회는 마지막 결과 저장도 차단한다", async 
   };
   await expect(collect(h.db, h.clock, revoke, input, signal())).rejects.toThrow("CONSENT_INACTIVE");
 });
+it("은행 수집 뒤 업무 날짜가 바뀌면 서로 다른 시점의 원천을 합치지 않는다", async () => {
+  const changing: SourceClient = {
+    async page(query, cursor) {
+      const page = await source.page(query, cursor);
+      if (query.source === "BANK" && !page.nextCursor)
+        h.clock.set(new Date(h.clock.now().getTime() + 1));
+      return page;
+    },
+  };
+  await expect(collect(h.db, h.clock, changing, input, signal())).rejects.toThrow(
+    "SOURCE_SNAPSHOT_CHANGED",
+  );
+});
+it("일중 수집도 KST 업무 날짜 기준 D+3 정산을 D+2로 앞당기지 않는다", async () => {
+  h.clock.set(new Date("2026-10-28T12:00:00+09:00"));
+  const ref = await collect(h.db, h.clock, source, input, signal());
+  expect(readDataset(h.db, ref.id).forecast7.daily.find((day) => day.day === 2)?.closingKrw).toBe(
+    3_000_000,
+  );
+});

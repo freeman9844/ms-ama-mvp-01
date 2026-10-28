@@ -22,7 +22,15 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
     },
   };
   const serviceToken = randomBytes(32).toString("hex");
-  const options = { db, clock, origin: "", serviceToken, ai: services.ai };
+  const options = {
+    db,
+    clock,
+    origin: "",
+    sourceUrl: "",
+    setTime: clock.set,
+    serviceToken,
+    ai: services.ai,
+  };
   const server = createServer(createApp(options));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -37,6 +45,7 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
       clock,
       serviceToken,
       appUrl: url,
+      setTime: clock.set,
     }),
   );
   mockServer.listen(0, "127.0.0.1");
@@ -44,6 +53,7 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
   const mockAddress = mockServer.address();
   if (!mockAddress || typeof mockAddress === "string") throw new Error("Missing mock port");
   const mockUrl = `http://127.0.0.1:${mockAddress.port}`;
+  options.sourceUrl = mockUrl;
   const sessions = new Map<string, { cookie: string; csrf: string }>();
   const raw = (
     method: string,
