@@ -11,6 +11,7 @@ import type { ServerOptions } from "../app.js";
 import { context, serviceAuthentication } from "../auth.js";
 import { z } from "zod";
 import { DomainError } from "../errors.js";
+import { idempotent } from "../transactions.js";
 
 export function internalConsentRoutes(app: Express, options: ServerOptions) {
   app.post(
@@ -61,7 +62,25 @@ export function consentRoutes(app: Express, options: ServerOptions) {
     });
   });
   app.post("/api/consents", (req, res) => {
-    res.status(201).json(grantConsent(options.db, options.clock, context(req).actor, req.body));
+    const actor = context(req).actor;
+    const body = consentInputSchema.parse(req.body);
+    const grant = () => grantConsent(options.db, options.clock, actor, body);
+    const key = req.get("idempotency-key");
+    res
+      .status(201)
+      .json(
+        key
+          ? idempotent(
+              options.db,
+              actor.id,
+              req.path,
+              key,
+              body,
+              z.object({ id: z.string(), version: z.number(), validUntil: z.string() }),
+              grant,
+            )
+          : grant(),
+      );
   });
   app.get("/api/consents", (req, res) => {
     res.json(listConsents(options.db, context(req).actor));

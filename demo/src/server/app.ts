@@ -11,6 +11,7 @@ import { jobRoutes } from "./routes/jobs.js";
 import { reviewRoutes } from "./routes/review.js";
 import { eventRoutes } from "./routes/events.js";
 import { supportRoutes } from "./routes/support.js";
+import { queryRoutes } from "./routes/queries.js";
 
 export type ServerOptions = {
   db: DatabaseSync;
@@ -20,6 +21,7 @@ export type ServerOptions = {
   ai?: AiPort;
   sourceUrl?: string;
   setTime?: (date: Date) => void;
+  webRoot?: string;
 };
 
 export function createApp(options: ServerOptions) {
@@ -44,6 +46,7 @@ export function createApp(options: ServerOptions) {
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
+  if (options.webRoot) app.use(express.static(options.webRoot));
   internalConsentRoutes(app, options);
   app.post("/api/demo-login", (req, res) => {
     const session = login(options.db, req.body);
@@ -58,6 +61,7 @@ export function createApp(options: ServerOptions) {
   reviewRoutes(app, options);
   eventRoutes(app, options);
   supportRoutes(app, options);
+  queryRoutes(app, options);
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });

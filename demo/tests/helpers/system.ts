@@ -11,7 +11,9 @@ import { createMockApp } from "../../src/mock/server.js";
 import { openSourceDb } from "../../src/mock/seed.js";
 import type { AiPort } from "../../src/copilot/port.js";
 
-export async function startTestSystem(services: { ai?: AiPort } = {}) {
+export async function startTestSystem(
+  services: { ai?: AiPort; port?: number; webRoot?: string } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "capstone-test-"));
   const db = openDb(join(directory, "app.db"));
   let now = new Date("2026-10-28T00:00:00+09:00");
@@ -30,9 +32,10 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
     setTime: clock.set,
     serviceToken,
     ai: services.ai,
+    webRoot: services.webRoot,
   };
   const server = createServer(createApp(options));
-  server.listen(0, "127.0.0.1");
+  server.listen(services.port ?? 0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing test server port");
