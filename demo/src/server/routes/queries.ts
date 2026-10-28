@@ -6,6 +6,7 @@ import { readAuthorizedDataset } from "../../agents/assembly.js";
 import { DomainError } from "../errors.js";
 import { warningSchema } from "../../copilot/schemas.js";
 import { loanView, supportView, timelineView, alertView } from "../../domain/views.js";
+import { maintenance } from "../reset.js";
 
 export function queryRoutes(app: Express, options: ServerOptions) {
   const { db, clock } = options;
@@ -13,6 +14,7 @@ export function queryRoutes(app: Express, options: ServerOptions) {
     const model = db.prepare("SELECT value FROM settings WHERE key='model_id'").get();
     res.json({
       now: clock.now().toISOString(),
+      maintenance: maintenance(db),
       modelId: model ? z.object({ value: z.string() }).parse(model).value : null,
     });
   });
@@ -168,6 +170,15 @@ export function queryRoutes(app: Express, options: ServerOptions) {
               )
               .get(row.id),
           );
+        const usage = z
+          .object({ inputTokens: z.number().nullable(), outputTokens: z.number().nullable() })
+          .parse(
+            db
+              .prepare(
+                "SELECT CASE WHEN COUNT(u.input_tokens)=COUNT(s.id) THEN SUM(u.input_tokens) ELSE NULL END AS inputTokens, CASE WHEN COUNT(u.output_tokens)=COUNT(s.id) THEN SUM(u.output_tokens) ELSE NULL END AS outputTokens FROM ai_sessions s LEFT JOIN ai_usage u ON u.session_id=s.id WHERE s.job_id=?",
+              )
+              .get(row.id),
+          );
         return timelineView.parse({
           id: row.id,
           applicationId: row.application_id,
@@ -176,6 +187,7 @@ export function queryRoutes(app: Express, options: ServerOptions) {
           errorCode: row.error_code,
           modelId: row.model_id,
           toolCount: count.n,
+          ...usage,
         });
       }),
     );

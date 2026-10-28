@@ -12,7 +12,7 @@ import {
 } from "../domain/contracts.js";
 import { serviceAuthentication } from "../server/auth.js";
 import { DomainError, errorHandler, handler } from "../server/errors.js";
-import { applySourceEvent } from "./events.js";
+import { applySourceEvent, resetSource } from "./events.js";
 
 export type MockOptions = {
   db: DatabaseSync;
@@ -30,6 +30,7 @@ export function createMockApp(options: MockOptions) {
   app.use(serviceAuthentication(options.serviceToken));
   app.use(express.json({ limit: "32kb", inflate: false }));
   app.post("/internal/events", (req, res) => res.json(applySourceEvent(options, req.body)));
+  app.post("/internal/reset", (req, res) => res.json(resetSource(options, req.body)));
   const paths: Record<Source, string> = {
     BANK: "/v1/bank/transactions",
     PG: "/v1/pg/settlements",

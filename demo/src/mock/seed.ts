@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { sourceRecordSchema, type SourceRecord } from "../domain/contracts.js";
+import { transaction } from "../server/transactions.js";
 
 export function openSourceDb(file: string): DatabaseSync {
   const db = new DatabaseSync(file);
@@ -16,8 +17,7 @@ export function seedSource(db: DatabaseSync) {
     const record = sourceRecordSchema.parse(input);
     insert.run(record.id, record.businessId, record.kind, JSON.stringify(record));
   };
-  db.exec("BEGIN IMMEDIATE");
-  try {
+  transaction(db, () => {
     for (const businessId of ["shop-a", "shop-b"]) {
       const bank = (
         id: string,
@@ -66,9 +66,5 @@ export function seedSource(db: DatabaseSync) {
         reportedRevenueKrw: 12_000_000,
       });
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+  });
 }

@@ -29,6 +29,33 @@ const request: AiRequest = {
   prompt: "합성 상환 지원 요청",
 };
 const signal = () => new AbortController().signal;
+it.each([true, false])(
+  "SDK 사용량은 보고된 수치 또는 미확인 null로 보존한다 (%s)",
+  async (reported) => {
+    const fake = createFakeRuntime();
+    const create = fake.runtime.createSession;
+    fake.runtime.createSession = async (config) => {
+      if (reported)
+        for (let i = 0; i < 2; i++)
+          config.onEvent?.({
+            type: "assistant.usage",
+            id: `usage-${i}`,
+            timestamp: new Date().toISOString(),
+            parentId: null,
+            ephemeral: true,
+            data: { model: "test-model", inputTokens: 10, outputTokens: 3 },
+          });
+      return create(config);
+    };
+    const ai = createAi({ db, root, runtime: fake.runtime, authorize() {} });
+    const result = await ai.run(request, signal());
+    expect(
+      db
+        .prepare("SELECT input_tokens,output_tokens FROM ai_usage WHERE session_id=?")
+        .get(result.sessionId),
+    ).toMatchObject({ input_tokens: reported ? 20 : null, output_tokens: reported ? 6 : null });
+  },
+);
 
 it("세션 생성 도중 삭제는 생성 완료·실행 중단을 기다리며 다시 살아나는 세션을 남기지 않는다", async () => {
   const fake = createFakeRuntime();

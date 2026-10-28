@@ -16,11 +16,18 @@ export function ApplicationStatus({
   id?: string;
   home?: boolean;
 }) {
-  const apps = useQuery("/api/applications", applications, epoch, (data) =>
-    data.some((row) => ["SUBMITTED", "COLLECTING", "ANALYZING"].includes(row.status)),
-  );
   const jobs = useQuery("/api/timeline", timeline, epoch, (data) =>
     data.some((row) => ["QUEUED", "RUNNING"].includes(row.status)),
+  );
+  const jobVersion = jobs.data?.map((job) => `${job.id}:${job.status}`).join(",");
+  const apps = useQuery("/api/applications", applications, `${epoch}:${jobVersion}`, (data) =>
+    data.some(
+      (row) =>
+        ["SUBMITTED", "COLLECTING", "ANALYZING"].includes(row.status) &&
+        jobs.data?.some(
+          (job) => job.applicationId === row.id && ["QUEUED", "RUNNING"].includes(job.status),
+        ),
+    ),
   );
   const action = useAction();
   return (

@@ -9,6 +9,8 @@
   "scripts": {
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:e2e:real": "playwright test --config playwright.real.config.ts --project real-ai",
+    "demo": "npm run build && tsx scripts/start.ts",
     "ai:smoke": "tsx scripts/ai-smoke.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts tests --no-error-on-unmatched-pattern",

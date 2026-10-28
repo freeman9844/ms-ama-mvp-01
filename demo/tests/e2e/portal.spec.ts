@@ -76,3 +76,54 @@ test("별도 모니터링 동의는 기본 해제이며 철회 후 삭제 완료
   await first.getByRole("button", { name: "철회 및 삭제 요청 확인" }).click();
   await expect(first).toContainText("접근: BLOCKED · 삭제: 완료");
 });
+test("사건 후 메타데이터 새로고침은 폼 선택과 완료 안내를 지우지 않는다", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "운영자로 시작" }).click();
+  await page.getByLabel("사건 유형").selectOption("ADVANCE_TIME");
+  await page.getByLabel("이동 일수").fill("1");
+  const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/demo/state"));
+  await page.getByRole("button", { name: "사건 실행" }).click();
+  await refreshed;
+  await expect(page.getByLabel("사건 유형")).toHaveValue("ADVANCE_TIME");
+  await expect(page.getByRole("status")).toContainText("APPLIED");
+});
+test("실패한 작업은 신청 상태가 분석 중이어도 자동 조회를 중단한다", async ({ page }) => {
+  let reads = 0;
+  await page.route("**/api/applications", async (route) => {
+    reads++;
+    await route.fulfill({
+      json: [
+        {
+          id: "failed-application",
+          status: "ANALYZING",
+          companyName: "실패 시나리오",
+          requestedAmountKrw: 1000000,
+          consentIds: [],
+          evidenceDeleted: false,
+        },
+      ],
+    });
+  });
+  await page.route("**/api/timeline", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "failed-job",
+          applicationId: "failed-application",
+          kind: "UNDERWRITE",
+          status: "FAILED",
+          errorCode: "AI_UNAVAILABLE",
+          modelId: "test",
+          toolCount: 0,
+          inputTokens: null,
+          outputTokens: null,
+        },
+      ],
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "합성 사업자 A로 시작" }).click();
+  await expect(page.getByRole("button", { name: "작업 재시도" })).toBeVisible();
+  await page.waitForTimeout(6500);
+  expect(reads).toBeLessThanOrEqual(2);
+});

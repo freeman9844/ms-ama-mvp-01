@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { z } from "zod";
 import { openDb } from "../../src/server/db.js";
-import { createApp } from "../../src/server/app.js";
+import { createApp, type ServerOptions } from "../../src/server/app.js";
 import { randomBytes } from "node:crypto";
 import { createMockApp } from "../../src/mock/server.js";
 import { openSourceDb } from "../../src/mock/seed.js";
@@ -24,7 +24,7 @@ export async function startTestSystem(
     },
   };
   const serviceToken = randomBytes(32).toString("hex");
-  const options = {
+  const options: ServerOptions = {
     db,
     clock,
     origin: "",
@@ -75,6 +75,7 @@ export async function startTestSystem(
     serviceToken,
     mockUrl,
     mockOptions,
+    appOptions: options,
     sourceDb,
     sourceRequest(source: string, query: unknown, cursor: string | null) {
       const paths: Record<string, string> = {

@@ -207,7 +207,7 @@ export function DemoControls({
                   confirmed: true,
                 });
                 setConfirm(false);
-                refresh();
+                location.reload();
               });
             }}
           >

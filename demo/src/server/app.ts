@@ -1,8 +1,10 @@
 import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import type { Clock } from "../domain/clock.js";
-import { authentication, context, login } from "./auth.js";
-import { DomainError, errorHandler } from "./errors.js";
+import { authentication, context, login, requireRole } from "./auth.js";
+import { DomainError, errorHandler, handler } from "./errors.js";
+import { z } from "zod";
+import { maintenance } from "./reset.js";
 import { consentRoutes, internalConsentRoutes } from "./routes/consents.js";
 import type { AiPort } from "../copilot/port.js";
 import { aiRoutes } from "./routes/ai.js";
@@ -22,6 +24,7 @@ export type ServerOptions = {
   sourceUrl?: string;
   setTime?: (date: Date) => void;
   webRoot?: string;
+  reset?: () => Promise<{ state: "RESET"; generation: number }>;
 };
 
 export function createApp(options: ServerOptions) {
@@ -43,6 +46,17 @@ export function createApp(options: ServerOptions) {
     next();
   });
   app.use(express.json({ limit: "32kb", inflate: false }));
+  app.use((req, _res, next) => {
+    if (
+      (req.path.startsWith("/api/") || req.path.startsWith("/internal/")) &&
+      !["/api/demo-login", "/api/me", "/api/logout", "/api/demo/state", "/api/demo/reset"].includes(
+        req.path,
+      ) &&
+      maintenance(options.db) !== "NONE"
+    )
+      return next(new DomainError("MAINTENANCE", 503));
+    next();
+  });
   app.get("/health", (_req, res) => {
     res.json({ status: "ok" });
   });
@@ -62,6 +76,17 @@ export function createApp(options: ServerOptions) {
   eventRoutes(app, options);
   supportRoutes(app, options);
   queryRoutes(app, options);
+  app.post(
+    "/api/demo/reset",
+    handler(async (req, res) => {
+      requireRole(context(req).actor, ["OPERATOR"]);
+      z.object({ confirmed: z.literal(true) }).parse(req.body);
+      if (!options.reset) throw new DomainError("RESET_NOT_CONFIGURED", 503);
+      const result = await options.reset();
+      res.clearCookie("demo_session", { path: "/" });
+      res.json(result);
+    }),
+  );
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });

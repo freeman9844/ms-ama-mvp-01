@@ -5,17 +5,19 @@ import { apiRequest } from "./api.js";
 export function useQuery<T>(
   path: string,
   schema: z.ZodType<T>,
-  epoch = 0,
+  epoch: number | string = 0,
   poll?: (data: T) => boolean,
 ) {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<string>();
+  const previous = useRef({ path, schema });
   const pollRef = useRef(poll);
   pollRef.current = poll;
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setData(undefined);
+    if (previous.current.path !== path || previous.current.schema !== schema) setData(undefined);
+    previous.current = { path, schema };
     setError(undefined);
     const load = async () => {
       try {

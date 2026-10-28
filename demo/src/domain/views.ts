@@ -3,7 +3,11 @@ import { actorSchema, sourceRecordSchema } from "./contracts.js";
 import { assessmentSchema, warningSchema } from "../copilot/schemas.js";
 
 export const sessionSchema = z.object({ actor: actorSchema, csrf: z.string() });
-export const demoStateSchema = z.object({ now: z.string(), modelId: z.string().nullable() });
+export const demoStateSchema = z.object({
+  now: z.string(),
+  modelId: z.string().nullable(),
+  maintenance: z.string(),
+});
 export const applicationView = z.object({
   id: z.string(),
   status: z.string(),
@@ -57,6 +61,8 @@ export const timelineView = z.object({
   errorCode: z.string().nullable(),
   modelId: z.string(),
   toolCount: z.number(),
+  inputTokens: z.number().nullable(),
+  outputTokens: z.number().nullable(),
 });
 const forecastView = z.object({
   minimumKrw: z.number(),

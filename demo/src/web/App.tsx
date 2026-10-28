@@ -62,6 +62,12 @@ function Portal({ actor, logout }: { actor: Actor; logout(): void }) {
           구성이 아닙니다. 현재 모델: <strong>{state.data?.modelId ?? "미선택"}</strong>
         </p>
         <ErrorNotice error={state.error} />
+        {state.data && state.data.maintenance !== "NONE" && (
+          <p role="alert" className="error">
+            유지보수 상태: {state.data.maintenance}. 일반 업무는 차단되었습니다. 운영자가 초기화를
+            재시도하세요.
+          </p>
+        )}
         {state.data &&
           (actor.role === "OFFICER" ? (
             <Officer epoch={epoch} refresh={refresh} />

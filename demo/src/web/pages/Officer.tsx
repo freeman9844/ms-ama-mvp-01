@@ -262,7 +262,8 @@ export function Officer({ epoch, refresh }: { epoch: number; refresh(): void }) 
         {jobs.data?.map((job) => (
           <p key={job.id}>
             {job.kind} · {label(job.status)}· 모델 {job.modelId || "미선택"} · 도구 {job.toolCount}
-            회 · {job.errorCode}
+            회 · 입력 토큰 {job.inputTokens ?? "미확인"} / 출력 토큰 {job.outputTokens ?? "미확인"}{" "}
+            · {job.errorCode}
           </p>
         ))}
       </details>

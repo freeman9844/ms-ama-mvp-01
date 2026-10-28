@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS tool_events (
   state TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_usage (
+  session_id TEXT PRIMARY KEY REFERENCES ai_sessions(id) ON DELETE CASCADE,
+  input_tokens INTEGER,
+  output_tokens INTEGER
+);
 INSERT OR IGNORE INTO settings VALUES ('generation', '1');
 CREATE TABLE IF NOT EXISTS applications (
   id TEXT PRIMARY KEY,

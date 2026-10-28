@@ -5,6 +5,34 @@ import { transaction } from "../server/transactions.js";
 import { DomainError } from "../server/errors.js";
 import { generation } from "../workflow/queue.js";
 import type { MockOptions } from "./server.js";
+import { seedSource } from "./seed.js";
+import { initialTime } from "../domain/clock.js";
+
+export function resetSource(options: MockOptions, input: unknown) {
+  const { generation: next } = z.object({ generation: z.number().int().positive() }).parse(input);
+  return transaction(options.db, () => {
+    const current = generation(options.db);
+    if (next < current) throw new DomainError("GENERATION_CHANGED", 409);
+    const previous = options.db
+      .prepare("SELECT value FROM settings WHERE key='reset_generation'")
+      .get();
+    if (previous && Number(z.object({ value: z.string() }).parse(previous).value) === next)
+      return { generation: next };
+    if (next <= current) throw new DomainError("RESET_GENERATION_REQUIRED", 409);
+    if (!options.setTime) throw new DomainError("CLOCK_NOT_CONFIGURED", 503);
+    options.db.exec(
+      "DELETE FROM source_events; DELETE FROM source_records; DELETE FROM source_faults;",
+    );
+    seedSource(options.db);
+    options.db.prepare("UPDATE source_state SET version=version+1 WHERE id=1").run();
+    options.db.prepare("UPDATE settings SET value=? WHERE key='generation'").run(String(next));
+    options.db
+      .prepare("INSERT OR REPLACE INTO settings VALUES ('reset_generation',?)")
+      .run(String(next));
+    options.setTime(new Date(initialTime));
+    return { generation: next };
+  });
+}
 
 export function applySourceEvent(options: MockOptions, input: unknown) {
   const value = sourceEventSchema.parse(input);

@@ -84,10 +84,12 @@ export function createAi(options: AiOptions): AiPort {
           request.modelId,
           request.role,
         );
+      options.db.prepare("INSERT INTO ai_usage VALUES (?,NULL,NULL)").run(id);
       let session: SdkSession | undefined;
       let violation: Error | undefined;
       let calls = 0;
       let usage: AiResult["usage"] = null;
+      let usageIncomplete = false;
       const controller = new AbortController();
       const completion = new EventEmitter();
       inFlight.set(id, { controller, done: once(completion, "finished").then(() => undefined) });
@@ -155,11 +157,16 @@ export function createAi(options: AiOptions): AiPort {
               const parsed = z
                 .object({ inputTokens: z.number(), outputTokens: z.number() })
                 .safeParse(event.data);
-              if (parsed.success)
+              if (!parsed.success) usageIncomplete = true;
+              if (parsed.success && !usageIncomplete)
                 usage = {
                   inputTokens: (usage?.inputTokens ?? 0) + parsed.data.inputTokens,
                   outputTokens: (usage?.outputTokens ?? 0) + parsed.data.outputTokens,
                 };
+              if (usageIncomplete) usage = null;
+              options.db
+                .prepare("UPDATE ai_usage SET input_tokens=?,output_tokens=? WHERE session_id=?")
+                .run(usage?.inputTokens ?? null, usage?.outputTokens ?? null, id);
             }
           },
         };
