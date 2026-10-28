@@ -9,8 +9,9 @@ import { createApp } from "../../src/server/app.js";
 import { randomBytes } from "node:crypto";
 import { createMockApp } from "../../src/mock/server.js";
 import { openSourceDb } from "../../src/mock/seed.js";
+import type { AiPort } from "../../src/copilot/port.js";
 
-export async function startTestSystem() {
+export async function startTestSystem(services: { ai?: AiPort } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "capstone-test-"));
   const db = openDb(join(directory, "app.db"));
   let now = new Date("2026-10-28T00:00:00+09:00");
@@ -21,7 +22,7 @@ export async function startTestSystem() {
     },
   };
   const serviceToken = randomBytes(32).toString("hex");
-  const options = { db, clock, origin: "", serviceToken };
+  const options = { db, clock, origin: "", serviceToken, ai: services.ai };
   const server = createServer(createApp(options));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");

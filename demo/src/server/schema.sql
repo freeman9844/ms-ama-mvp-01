@@ -55,3 +55,20 @@ CREATE TABLE IF NOT EXISTS forecasts (
   dataset_id TEXT PRIMARY KEY REFERENCES datasets(id) ON DELETE CASCADE,
   payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_sessions (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  consent_ids TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  state TEXT NOT NULL,
+  error_code TEXT
+);
+CREATE TABLE IF NOT EXISTS tool_events (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES ai_sessions(id),
+  tool TEXT NOT NULL,
+  state TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);

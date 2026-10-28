@@ -10,7 +10,12 @@ import {
   type SourcePage,
   type SourceRecord,
 } from "../domain/contracts.js";
-import { forecast, forecastSchema, type ScheduledFlow } from "../domain/forecast.js";
+import {
+  forecast,
+  forecastSchema,
+  scheduledFlowSchema,
+  type ScheduledFlow,
+} from "../domain/forecast.js";
 import { addKrw } from "../domain/money.js";
 import { authorize } from "./consent.js";
 import { DomainError } from "../server/errors.js";
@@ -39,6 +44,7 @@ export const datasetSchema = z.object({
   forecast7: forecastSchema,
   forecast30: forecastSchema,
   sourceSnapshotIds: z.array(z.string()),
+  scheduledFlows: z.array(scheduledFlowSchema),
 });
 export type Dataset = z.infer<typeof datasetSchema>;
 export async function collect(
@@ -164,6 +170,7 @@ export async function collect(
       forecast7,
       forecast30,
       sourceSnapshotIds: snapshots,
+      scheduledFlows: flows,
     };
     const { records: sourceRecords, ...metadata } = result;
     db.prepare("INSERT INTO datasets VALUES (?, ?, ?, ?, 'VALID', ?)").run(
