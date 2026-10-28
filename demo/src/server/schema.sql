@@ -28,3 +28,30 @@ CREATE TABLE IF NOT EXISTS consents (
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   version INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS datasets (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL,
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  version INTEGER NOT NULL,
+  validation_status TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  UNIQUE(application_id, version)
+);
+CREATE TABLE IF NOT EXISTS dataset_consents (
+  dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  consent_id TEXT NOT NULL REFERENCES consents(id),
+  consent_version INTEGER NOT NULL,
+  PRIMARY KEY(dataset_id, consent_id)
+);
+CREATE TABLE IF NOT EXISTS source_records (
+  dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  source_record_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY(dataset_id, source, resource_id, source_record_id)
+);
+CREATE TABLE IF NOT EXISTS forecasts (
+  dataset_id TEXT PRIMARY KEY REFERENCES datasets(id) ON DELETE CASCADE,
+  payload TEXT NOT NULL
+);
