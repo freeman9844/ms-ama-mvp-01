@@ -1,2 +1,8 @@
 .superpowers/
 .worktrees/
+demo/node_modules/
+demo/.local/
+demo/dist/
+demo/.env
+demo/test-results/
+demo/playwright-report/

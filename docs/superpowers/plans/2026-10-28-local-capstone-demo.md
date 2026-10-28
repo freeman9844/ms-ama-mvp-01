@@ -97,7 +97,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 Copilot-Session: 8d1142a0-1765-47ea-ae88-b21cf81d5dd8
 ```
 
-## 작업 1: 로컬 API·SQLite·역할 세션
+## Task 1: 로컬 API·SQLite·역할 세션
 
 **파일:** 위 구성 파일 7개, `demo\src\server\{db.ts,schema.sql,app.ts,auth.ts,errors.ts}`, `demo\src\domain\{contracts.ts,clock.ts}`, `demo\tests\helpers\system.ts`, `demo\tests\auth.test.ts` 생성. 루트 `.gitignore` 수정.
 
@@ -174,7 +174,7 @@ export class DomainError extends Error {
 
 - [ ] **5. 대상 테스트·타입·lint·포맷을 실행하고 `feat: add local API and demo sessions`로 커밋한다.** 이 단계의 검증 가능한 산출물은 `/health`, `/api/me`, 역할·CSRF 차단이다.
 
-## 작업 2: 동의 계약·분리된 mock HTTP 원천
+## Task 2: 동의 계약·분리된 mock HTTP 원천
 
 **파일:** `demo\src\agents\consent.ts`, `demo\src\server\routes\consents.ts`, `demo\src\mock\{server.ts,schema.sql,seed.ts}`, `demo\tests\{consent.test.ts,mock.test.ts}` 생성. `schema.sql`, `contracts.ts`, `app.ts`, 테스트 helper 수정.
 
@@ -252,7 +252,7 @@ PG·TAX는 별도 원천 계약을 사용한다. PG D+3 미지급 500만 원과 
 
 - [ ] **5. snapshot 변경·커서 범위·빈 결과·서비스 토큰 없는 접근도 검증하고 `feat: add scoped consent and mock sources`로 커밋한다.**
 
-## 작업 3: Data Assembly와 코드 기반 현금흐름
+## Task 3: Data Assembly와 코드 기반 현금흐름
 
 **파일:** `demo\src\agents\assembly.ts`, `demo\src\domain\{money.ts,forecast.ts}`, `demo\tests\{assembly.test.ts,forecast.test.ts}` 생성. 공통 계약·업무 schema 수정.
 
@@ -331,7 +331,7 @@ export function addKrw(a: number, b: number): number {
 
 - [ ] **5. 중간 페이지 실패·snapshot 교체·철회 중 수집·같은 ID의 상충 자료를 테스트하고 `feat: assemble consented cash-flow datasets`로 커밋한다.** 원천 오류는 `FAILED`, 고객 보완이 필요한 자료 불일치는 `NEEDS_INFORMATION`으로 분류한다.
 
-## 작업 4: 신청과 영속 작업 실행기
+## Task 4: 신청과 영속 작업 실행기
 
 **파일:** `demo\src\workflow\{queue.ts,runner.ts,handlers.ts}`, `demo\src\server\routes\{applications.ts,jobs.ts}`, `demo\tests\workflow.test.ts` 생성. 업무 schema·app·테스트 helper 수정.
 
@@ -399,7 +399,7 @@ WHERE id = ? AND (status = 'QUEUED' OR
 
 - [ ] **5. 실제 DB 파일 재오픈, 중복 제출·보완, 중단·재시도, 두 선점 경쟁을 검증하고 `feat: persist application workflow and recovery`로 커밋한다.**
 
-## 작업 5: 실제 Copilot SDK와 제한된 도구
+## Task 5: 실제 Copilot SDK와 제한된 도구
 
 **파일:** `demo\src\copilot\{port.ts,client.ts,tools.ts,schemas.ts}`, `demo\src\server\routes\ai.ts`, `demo\scripts\ai-smoke.ts`, `demo\tests\{copilot.test.ts,helpers\fake-ai.ts}` 생성. manifest·lockfile·app 수정.
 
@@ -510,7 +510,7 @@ npm run ai:smoke -- --model $env:DEMO_MODEL_ID
 
 - [ ] **6. 인증정보·금융 원문이 로그와 Git에 없는지 확인하고 `feat: integrate constrained Copilot inference`로 커밋한다.** 실제 호출 미완료는 대역 테스트 통과와 별개로 기록한다.
 
-## 작업 6: Underwriting과 담당자 승인
+## Task 6: Underwriting과 담당자 승인
 
 **파일:** `demo\src\agents\underwriting.ts`, `demo\src\server\routes\review.ts`, `demo\tests\underwriting.test.ts` 생성. schema·SDK schemas·workflow handlers 수정.
 
@@ -570,7 +570,7 @@ for (const factor of assessment.factors) {
 
 - [ ] **5. 근거 위조·borrower 승인·미동의 승인·동시 승인·LLM 오류를 검증하고 `feat: add AI assessment and human approval`로 커밋한다.**
 
-## 작업 7: Early-Warning·Collections·합성 사건
+## Task 7: Early-Warning·Collections·합성 사건
 
 **파일:** `demo\src\agents\{warning.ts,collections.ts}`, `demo\src\mock\events.ts`, `demo\src\server\routes\{events.ts,support.ts}`, `demo\src\domain\support-policy.ts`, `demo\tests\{warning.test.ts,collections.test.ts,events.test.ts}` 생성. schema·handlers·contracts 수정.
 
@@ -644,7 +644,7 @@ export const templates: Record<SupportRoute, string> = {
 
 - [ ] **5. 날짜 이동·정산 지급 중복·미납과 경보 분리·발송 빈도·모델의 임의 조건 거부를 검증하고 `feat: add warning and fair support workflows`로 커밋한다.**
 
-## 작업 8: 철회·만료·삭제와 작업 경쟁
+## Task 8: 철회·만료·삭제와 작업 경쟁
 
 **파일:** `demo\src\agents\consent.ts`, `demo\src\workflow\{runner.ts,handlers.ts}`, `demo\src\copilot\client.ts`, 업무 schema 수정. `demo\src\server\deletion.ts`, `demo\tests\deletion.test.ts` 생성.
 
@@ -699,7 +699,7 @@ WHERE id IN (SELECT dataset_id FROM dataset_consents WHERE consent_id = ?);
 
 - [ ] **5. 만료 경계·page 응답 직전 철회·삭제 중 재시작·SDK 정리 실패·다른 목적 보존·원천 보존을 검증하고 `feat: enforce consent deletion lifecycle`로 커밋한다.**
 
-## 작업 9: 한국어 사업자 포털·담당자·데모 화면
+## Task 9: 한국어 사업자 포털·담당자·데모 화면
 
 **파일:** `demo\index.html`, `demo\src\web\{main.tsx,App.tsx,api.ts,styles.css}`, `demo\src\web\pages\{Home.tsx,Application.tsx,ApplicationStatus.tsx,Consents.tsx,Repayments.tsx,Support.tsx,Officer.tsx,DemoControls.tsx}`, `demo\tests\e2e\portal.spec.ts`, `demo\playwright.config.ts` 생성. app·routes 수정.
 
@@ -756,7 +756,7 @@ DemoControls에는 명시적 모델 선택, 사건 입력, 시간 이동, 원천
 
 - [ ] **5. 키보드 조작·모바일 폭·다른 사업자 접근·승인 409·삭제 상태·미동의 모니터링을 확인하고 `feat: build borrower and officer demo screens`로 커밋한다.**
 
-## 작업 10: 실행·초기화·문서·전체 여정
+## Task 10: 실행·초기화·문서·전체 여정
 
 **파일:** `demo\scripts\{start.ts,server-main.ts,mock-main.ts}`, `demo\src\server\reset.ts`, `demo\README.md`, `demo\.env.example`, `demo\tests\launcher.test.ts`, `demo\tests\e2e\journey.spec.ts`, `demo\tests\e2e\real-ai.spec.ts` 생성. manifest·Playwright 설정·events route 수정.
 
