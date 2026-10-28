@@ -8,6 +8,7 @@ import type { AiPort } from "../copilot/port.js";
 import { aiRoutes } from "./routes/ai.js";
 import { applicationRoutes } from "./routes/applications.js";
 import { jobRoutes } from "./routes/jobs.js";
+import { reviewRoutes } from "./routes/review.js";
 
 export type ServerOptions = {
   db: DatabaseSync;
@@ -50,6 +51,7 @@ export function createApp(options: ServerOptions) {
   aiRoutes(app, options);
   applicationRoutes(app, options);
   jobRoutes(app, options);
+  reviewRoutes(app, options);
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });

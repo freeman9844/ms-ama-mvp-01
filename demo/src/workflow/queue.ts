@@ -185,6 +185,20 @@ export function complete(db: DatabaseSync, job: Job, resultId: string, businessN
       ).run(resultId, resultId, job.applicationId);
       enqueue(db, { ...job, kind: "UNDERWRITE" });
     }
+    if (job.kind === "UNDERWRITE") {
+      const app = z
+        .object({ dataset_id: z.string() })
+        .parse(db.prepare("SELECT dataset_id FROM applications WHERE id=?").get(job.applicationId));
+      const result = db
+        .prepare(
+          "UPDATE assessments SET status='VALID' WHERE id=? AND application_id=? AND dataset_id=? AND status='STAGED'",
+        )
+        .run(resultId, job.applicationId, app.dataset_id);
+      if (result.changes !== 1) throw new DomainError("RESULT_NOT_STAGED", 409);
+      db.prepare(
+        "UPDATE applications SET status='AWAITING_REVIEW',assessment_id=?,assessment_version=(SELECT version FROM assessments WHERE id=?) WHERE id=?",
+      ).run(resultId, resultId, job.applicationId);
+    }
     db.prepare("UPDATE jobs SET status='COMPLETED',result_id=? WHERE id=? AND claim_token=?").run(
       resultId,
       job.id,

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { DomainError } from "./errors.js";
 
 export function transaction<T>(db: DatabaseSync, work: () => T): T {
+  if (db.isTransaction) return work();
   db.exec("BEGIN IMMEDIATE");
   try {
     const result = work();

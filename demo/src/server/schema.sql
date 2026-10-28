@@ -109,3 +109,38 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   response TEXT NOT NULL,
   PRIMARY KEY(actor_id, route, key)
 );
+CREATE TABLE IF NOT EXISTS assessments (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES applications(id),
+  dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  UNIQUE(application_id, version)
+);
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES applications(id),
+  actor_id TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  dataset_version INTEGER NOT NULL,
+  assessment_version INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS loans (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL UNIQUE REFERENCES applications(id),
+  business_id TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS repayment_schedules (
+  id TEXT PRIMARY KEY,
+  loan_id TEXT NOT NULL REFERENCES loans(id),
+  due_at TEXT NOT NULL,
+  amount_krw INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1
+);

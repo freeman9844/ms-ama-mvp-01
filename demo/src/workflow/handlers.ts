@@ -8,6 +8,39 @@ import { consentInputSchema } from "../agents/consent.js";
 import { consentQuerySchema } from "../domain/contracts.js";
 import { DomainError } from "../server/errors.js";
 import type { ScheduledFlow } from "../domain/forecast.js";
+import type { AiRequest } from "../copilot/port.js";
+import { assertJob, getJob } from "./queue.js";
+import { readDataset } from "../agents/assembly.js";
+
+export function authorizeAiRequest(db: DatabaseSync, clock: Clock, request: AiRequest) {
+  const job = getJob(db, request.jobId);
+  assertJob(db, job, clock.now());
+  const expected =
+    job.kind === "UNDERWRITE"
+      ? "UNDERWRITING"
+      : job.kind === "MONITOR"
+        ? "WARNING"
+        : job.kind === "SUPPORT"
+          ? "COLLECTIONS"
+          : null;
+  if (
+    request.businessId !== job.businessId ||
+    request.modelId !== job.modelId ||
+    request.role !== expected
+  )
+    throw new DomainError("AI_JOB_SCOPE", 403);
+  if (request.dataset) {
+    const data = readDataset(db, request.dataset.id);
+    if (
+      data.businessId !== job.businessId ||
+      data.applicationId !== job.applicationId ||
+      data.version !== request.dataset.version ||
+      data.consentIds.some((id) => !job.consentIds.includes(id))
+    ) {
+      throw new DomainError("AI_DATASET_SCOPE", 403);
+    }
+  } else if (job.kind !== "SUPPORT") throw new DomainError("AI_DATASET_REQUIRED", 403);
+}
 
 export function createAssembler(
   db: DatabaseSync,
