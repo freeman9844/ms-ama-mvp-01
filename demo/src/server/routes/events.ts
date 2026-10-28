@@ -44,11 +44,22 @@ export function enqueueMonitoring(options: ServerOptions) {
 
 export function eventRoutes(app: Express, options: ServerOptions) {
   app.post(
-    "/api/demo/events",
+    ["/api/demo/events", "/api/demo/events/recover"],
     handler(async (req, res) => {
       requireRole(context(req).actor, ["OPERATOR"]);
-      const event = eventSchema.parse(req.body);
       const { db, clock } = options;
+      let input: unknown = req.body;
+      if (req.path.endsWith("/recover")) {
+        const pending = db.prepare("SELECT payload FROM demo_events WHERE state='PENDING'").get();
+        if (!pending) {
+          res.json({ state: "IDLE" });
+          return;
+        }
+        input = sourceEventSchema.parse(
+          JSON.parse(z.object({ payload: z.string() }).parse(pending).payload),
+        ).event;
+      }
+      const event = eventSchema.parse(input);
       if (!options.sourceUrl || !options.setTime) throw new DomainError("DEMO_NOT_CONFIGURED", 503);
       const command = transaction(db, () => {
         const previous = db.prepare("SELECT * FROM demo_events WHERE id=?").get(event.id);

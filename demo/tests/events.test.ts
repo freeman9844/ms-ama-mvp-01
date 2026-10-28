@@ -2,6 +2,71 @@ import { expect, it } from "vitest";
 import { createReviewFixture } from "./helpers/review.js";
 import { z } from "zod";
 import { consentInput } from "./helpers/consent.js";
+import { claim, complete } from "../src/workflow/queue.js";
+import { readDataset } from "../src/agents/assembly.js";
+import { persistentClock } from "../src/server/clock.js";
+import { openDb } from "../src/server/db.js";
+import { createAssembler } from "../src/workflow/handlers.js";
+
+it("정산 지급 후 오래된 동의로 과거 잔액과 현재 PG 상태를 혼합하지 않는다", async () => {
+  const h = await createReviewFixture();
+  try {
+    await h.runAssessment();
+    await h.review({ decision: "REQUEST_INFORMATION" });
+    await h.request("operator", "POST", "/api/demo/events", {
+      id: "correction-paid",
+      businessId: "shop-a",
+      type: "SETTLEMENT_PAID",
+      settlementId: "shop-a-settlement",
+    });
+    const response = await h.request(
+      "shop-a",
+      "POST",
+      `/api/applications/${h.applicationId}/corrections`,
+      { fixtureId: "synthetic-confirmation" },
+      { "idempotency-key": "old-correction" },
+    );
+    expect(response.status).toBe(403);
+    expect(
+      h.db.prepare("SELECT status FROM applications WHERE id=?").get(h.applicationId),
+    ).toMatchObject({ status: "NEEDS_INFORMATION" });
+    const ids = [];
+    for (const source of ["BANK", "PG", "TAX"]) {
+      const consent = await h.request("shop-a", "POST", "/api/consents", {
+        ...consentInput,
+        source,
+        resourceIds: [`${source.toLowerCase()}-shop-a`],
+        to: h.clock.now().toISOString(),
+      });
+      ids.push(z.object({ id: z.string() }).parse(consent.body).id);
+    }
+    expect(
+      (
+        await h.request(
+          "shop-a",
+          "POST",
+          `/api/applications/${h.applicationId}/corrections`,
+          { fixtureId: "synthetic-confirmation", consentIds: ids },
+          { "idempotency-key": "new-correction" },
+        )
+      ).status,
+    ).toBe(202);
+    const job = claim(h.db, Date.now(), ["ASSEMBLE"]);
+    if (!job) throw new Error("Missing correction");
+    const datasetId = await createAssembler(
+      h.db,
+      h.clock,
+      h.mockUrl,
+      h.serviceToken,
+    )(job, new AbortController().signal);
+    complete(h.db, job, datasetId, h.clock.now());
+    const data = readDataset(h.db, datasetId);
+    expect(data.balanceKrw).toBe(8000000);
+    expect(data.forecast30.closingKrw).toBe(1000000);
+  } finally {
+    await h.close();
+  }
+});
 
 it("원천 장애 사건은 지정한 요청 수만 실패시키고 자동 미납을 만들지 않는다", async () => {
   const h = await createReviewFixture();
@@ -111,6 +176,9 @@ it("원천 사건의 오래된 재전송은 업무 시계를 되돌리지 않는
 it("원천만 지급 완료한 뒤 재시작해도 PENDING 사건을 중복 입금 없이 복구한다", async () => {
   const h = await createReviewFixture();
   try {
+    const sourceClock = persistentClock(h.sourceDb);
+    h.mockOptions.clock = sourceClock;
+    h.mockOptions.setTime = sourceClock.set;
     const event = {
       id: "recover-paid",
       businessId: "shop-a",
@@ -130,7 +198,30 @@ it("원천만 지급 완료한 뒤 재시작해도 PENDING 사건을 중복 입�
       body: payload,
     });
     expect(applied.status).toBe(200);
-    expect((await h.request("operator", "POST", "/api/demo/events", event)).status).toBe(200);
+    expect(sourceClock.now().getTime()).toBe(h.clock.now().getTime() + 1);
+    const path = z
+      .object({ file: z.string() })
+      .parse(h.db.prepare("PRAGMA database_list").get()).file;
+    const reopened = openDb(path);
+    try {
+      const recoveredClock = persistentClock(reopened);
+      h.appOptions.db = reopened;
+      h.appOptions.clock = recoveredClock;
+      h.appOptions.setTime = recoveredClock.set;
+      expect((await h.request("shop-a", "POST", "/api/demo/events/recover", {})).status).toBe(403);
+      expect((await h.request("operator", "POST", "/api/demo/events/recover", {})).status).toBe(
+        200,
+      );
+      expect(recoveredClock.now().toISOString()).toBe(sourceClock.now().toISOString());
+      expect((await h.request("operator", "POST", "/api/demo/events/recover", {})).status).toBe(
+        200,
+      );
+    } finally {
+      h.appOptions.db = h.db;
+      h.appOptions.clock = h.clock;
+      h.appOptions.setTime = h.clock.set;
+      reopened.close();
+    }
     expect(
       h.sourceDb
         .prepare("SELECT COUNT(*) AS n FROM source_records WHERE id='recover-paid-bank'")

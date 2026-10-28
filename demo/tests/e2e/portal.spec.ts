@@ -1,4 +1,36 @@
 import { expect, test } from "@playwright/test";
+import { login } from "./helpers.js";
+
+test("보완 수집의 조회기간 변경은 별도 동의를 받아 재개한다", async ({ page }) => {
+  await page.goto("/");
+  await login(page, "shop-a");
+  await page.getByRole("link", { name: "대출 신청", exact: true }).click();
+  await page.getByLabel("사업자명", { exact: true }).fill("보완 갱신 검증");
+  await page.getByRole("checkbox", { name: "신청 심사 데이터 제공 동의" }).check();
+  await page.getByRole("button", { name: "최종 제출" }).click();
+  await expect(page.getByText("담당자 검토 대기", { exact: true })).toBeVisible();
+  await login(page, "officer");
+  await page
+    .locator("article")
+    .filter({ has: page.getByRole("heading", { name: "보완 갱신 검증 · 담당자 검토 대기" }) })
+    .getByRole("button", { name: "심사 상세 열기" })
+    .click();
+  await page.getByRole("button", { name: "보완 요청", exact: true }).click();
+  await login(page, "operator");
+  await page.getByLabel("사건 유형").selectOption("ADVANCE_TIME");
+  await page.getByLabel("이동 일수").fill("1");
+  await page.getByRole("button", { name: "사건 실행" }).click();
+  await expect(page.getByRole("status")).toContainText("APPLIED");
+  await login(page, "shop-a");
+  const card = page
+    .locator("article")
+    .filter({ has: page.getByRole("heading", { name: "보완 갱신 검증 · 10,000,000원" }) });
+  const consent = card.getByRole("checkbox", { name: "보완 심사 자료 제공 동의 갱신" });
+  await expect(consent).not.toBeChecked();
+  await consent.check();
+  await card.getByRole("button", { name: "합성 보완자료 제출" }).click();
+  await expect(card.getByText("담당자 검토 대기", { exact: true })).toBeVisible();
+});
 
 test("동의는 사전 선택되지 않고 수집 결과 승인 단계가 없다", async ({ page }) => {
   await page.goto("/");

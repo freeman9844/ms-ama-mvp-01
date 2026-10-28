@@ -83,6 +83,8 @@ function Portal({ actor, logout }: { actor: Actor; logout(): void }) {
             <Support epoch={epoch} refresh={refresh} />
           ) : (
             <ApplicationStatus
+              actor={actor}
+              now={state.data.now}
               epoch={epoch}
               refresh={refresh}
               id={route.split("/")[1]}

@@ -139,6 +139,21 @@ export function claim(
     };
   });
 }
+export function assertWorkState(db: DatabaseSync, job: Job): void {
+  if (job.kind === "ASSEMBLE" || job.kind === "UNDERWRITE") {
+    const app = db.prepare("SELECT status FROM applications WHERE id=?").get(job.applicationId);
+    const status = z.object({ status: z.string() }).parse(app).status;
+    const allowed = job.kind === "ASSEMBLE" ? ["SUBMITTED", "COLLECTING"] : ["ANALYZING"];
+    if (!allowed.includes(status)) throw new DomainError("JOB_OBSOLETE", 409);
+  }
+  if (
+    job.kind === "SUPPORT" &&
+    db
+      .prepare("SELECT 1 FROM support_requests WHERE id=? AND status='REVIEWED'")
+      .get(job.referenceId)
+  )
+    throw new DomainError("JOB_OBSOLETE", 409);
+}
 export function assertJob(db: DatabaseSync, job: Job, now: Date): void {
   const raw = db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id);
   if (!raw) throw new DomainError("JOB_INVALIDATED", 409);
@@ -153,6 +168,7 @@ export function assertJob(db: DatabaseSync, job: Job, now: Date): void {
     throw new DomainError("JOB_INVALIDATED", 409);
   }
   if (job.kind === "DELETE") return;
+  assertWorkState(db, job);
   for (const id of job.consentIds) {
     const consent = z
       .object({ status: z.string(), payload: z.string(), business_id: z.string() })
@@ -214,19 +230,25 @@ export function fail(db: DatabaseSync, job: Job, error: unknown) {
   const retry =
     ["SOURCE_UNAVAILABLE", "SOURCE_SNAPSHOT_CHANGED", "AI_TRANSIENT"].includes(code) &&
     job.attempt < (["UNDERWRITE", "MONITOR", "SUPPORT"].includes(job.kind) ? 2 : 3);
-  db.prepare(
-    "UPDATE jobs SET status=?,error_code=?,retry_at_ms=? WHERE id=? AND status='RUNNING' AND claim_token=?",
-  ).run(
-    blocked ? "BLOCKED_BY_CONSENT" : retry ? "QUEUED" : "FAILED",
-    code,
-    Date.now() + 1_000,
-    job.id,
-    job.claimToken,
-  );
-  if (job.applicationId && ["BALANCE_MISMATCH", "CONFLICTING_RECORD"].includes(code)) {
-    db.prepare("UPDATE applications SET status='NEEDS_INFORMATION' WHERE id=?").run(
-      job.applicationId,
+  const updated = db
+    .prepare(
+      "UPDATE jobs SET status=?,error_code=?,retry_at_ms=? WHERE id=? AND status='RUNNING' AND claim_token=?",
+    )
+    .run(
+      blocked ? "BLOCKED_BY_CONSENT" : retry ? "QUEUED" : "FAILED",
+      code,
+      Date.now() + 1_000,
+      job.id,
+      job.claimToken,
     );
+  if (
+    updated.changes &&
+    job.applicationId &&
+    ["BALANCE_MISMATCH", "CONFLICTING_RECORD"].includes(code)
+  ) {
+    db.prepare(
+      "UPDATE applications SET status='NEEDS_INFORMATION' WHERE id=? AND status IN ('SUBMITTED','COLLECTING','ANALYZING')",
+    ).run(job.applicationId);
   }
   if (code === "JOB_EXECUTION_FAILED")
     console.error(

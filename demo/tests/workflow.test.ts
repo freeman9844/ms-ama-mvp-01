@@ -107,6 +107,26 @@ it("실패 재시도는 별도 작업이며 같은 요청으로 중복 생성하
   expect(first.status).toBe(202);
   expect((await retry()).body).toEqual(first.body);
   expect(first.body).not.toEqual({ jobId });
+  expect(
+    (
+      await h.request(
+        "shop-a",
+        "POST",
+        `/api/jobs/${jobId}/retry`,
+        {},
+        { "idempotency-key": "retry-again" },
+      )
+    ).status,
+  ).toBe(409);
+});
+it("3개월 동의는 필요한 6개월 심사 범위를 대체하지 못한다", async () => {
+  const narrow = await h.request("shop-a", "POST", "/api/consents", {
+    ...consentInput,
+    from: "2026-07-28T00:00:00+09:00",
+  });
+  consentIds[0] = z.object({ id: z.string() }).parse(narrow.body).id;
+  expect((await submit()).status).toBe(403);
+  expect(h.db.prepare("SELECT COUNT(*) AS n FROM jobs").get()).toMatchObject({ n: 0 });
 });
 
 it("보완 요청을 재제출해도 한 번만 재수집한다", async () => {

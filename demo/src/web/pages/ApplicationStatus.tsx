@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { useRef, useState } from "react";
+import type { Actor } from "../../domain/contracts.js";
+import { consentBody } from "./Application.js";
 import { applicationView, timelineView } from "../../domain/views.js";
 import { ErrorNotice, label, money, useAction, useQuery } from "../hooks.js";
 import { send } from "../api.js";
@@ -10,12 +13,18 @@ export function ApplicationStatus({
   refresh,
   id,
   home = false,
+  actor,
+  now,
 }: {
   epoch: number;
   refresh(): void;
   id?: string;
   home?: boolean;
+  actor: Actor;
+  now: string;
 }) {
+  const [renew, setRenew] = useState<Record<string, boolean>>({});
+  const grants = useRef(new Map<string, { key: string; id?: string }>());
   const jobs = useQuery("/api/timeline", timeline, epoch, (data) =>
     data.some((row) => ["QUEUED", "RUNNING"].includes(row.status)),
   );
@@ -56,21 +65,57 @@ export function ApplicationStatus({
               <p>근거 자료 삭제됨 · 대출·사람의 결정은 별도 업무 기록입니다.</p>
             )}
             {app.status === "NEEDS_INFORMATION" && (
-              <button
-                disabled={action.busy}
-                onClick={() => {
-                  void action.run(async () => {
-                    await send(
-                      `/api/applications/${app.id}/corrections`,
-                      z.object({ jobId: z.string() }),
-                      { fixtureId: "synthetic-confirmation" },
-                    );
-                    refresh();
-                  });
-                }}
-              >
-                합성 보완자료 제출
-              </button>
+              <>
+                <p>
+                  기존 동의가 현재 조회기간을 포함하지 않으면 새 동의가 필요합니다. BANK 거래·잔액,
+                  PG 정산, TAX 신고 자료를 신청 심사 목적으로 2026-04-28부터 {now}까지 제공합니다.
+                  유효기한은 동의 시점부터 30일입니다.
+                </p>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={renew[app.id] ?? false}
+                    onChange={(event) => setRenew({ ...renew, [app.id]: event.target.checked })}
+                  />
+                  보완 심사 자료 제공 동의 갱신
+                </label>
+                <button
+                  disabled={action.busy}
+                  onClick={() => {
+                    void action.run(async () => {
+                      let consentIds: string[] | undefined;
+                      if (renew[app.id]) {
+                        consentIds = [];
+                        for (const source of ["BANK", "PG", "TAX"]) {
+                          const cacheKey = `${app.id}:${now}:${source}`;
+                          let grant = grants.current.get(cacheKey);
+                          if (!grant) {
+                            grant = { key: crypto.randomUUID() };
+                            grants.current.set(cacheKey, grant);
+                          }
+                          grant.id ??= (
+                            await send(
+                              "/api/consents",
+                              z.object({ id: z.string() }),
+                              consentBody(source, actor.businessId!, "ASSESSMENT", now),
+                              grant.key,
+                            )
+                          ).id;
+                          consentIds.push(grant.id);
+                        }
+                      }
+                      await send(
+                        `/api/applications/${app.id}/corrections`,
+                        z.object({ jobId: z.string() }),
+                        { fixtureId: "synthetic-confirmation", consentIds },
+                      );
+                      refresh();
+                    });
+                  }}
+                >
+                  합성 보완자료 제출
+                </button>
+              </>
             )}
             {jobs.data
               ?.filter((job) => job.applicationId === app.id)

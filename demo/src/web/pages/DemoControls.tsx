@@ -66,6 +66,26 @@ export function DemoControls({
         설정 새로고침
       </button>
       <h2>합성 사건</h2>
+      <p>
+        사건 실패 후 새로 접속했거나 EVENT_IN_PROGRESS가 표시되면 저장된 미완료 사건을 복구하세요.
+      </p>
+      <button
+        disabled={action.busy}
+        onClick={() => {
+          void action.run(async () => {
+            const response = await send(
+              "/api/demo/events/recover",
+              z.object({ state: z.string() }),
+              {},
+            );
+            setResult(`사건 복구 ${response.state}`);
+            attempt.current = { body: "", key: "" };
+            refresh();
+          });
+        }}
+      >
+        미완료 사건 복구
+      </button>
       <label>
         사업자
         <select

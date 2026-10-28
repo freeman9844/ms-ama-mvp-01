@@ -1,6 +1,27 @@
 import { expect, it } from "vitest";
 import { createReviewFixture } from "./helpers/review.js";
 import { createTestAi } from "./helpers/fake-ai.js";
+import { claim, enqueue, fail, getJob } from "../src/workflow/queue.js";
+import { createUnderwriter } from "../src/agents/underwriting.js";
+import { DomainError } from "../src/server/errors.js";
+import { z } from "zod";
+
+it("완료된 작업의 늦은 오류는 사람의 결정 상태를 변경하지 않는다", async () => {
+  const h = await createReviewFixture();
+  try {
+    await h.runAssessment();
+    await h.review();
+    const { id } = z
+      .object({ id: z.string() })
+      .parse(h.db.prepare("SELECT id FROM jobs WHERE kind='ASSEMBLE'").get());
+    fail(h.db, getJob(h.db, id), new DomainError("BALANCE_MISMATCH", 502));
+    expect(
+      h.db.prepare("SELECT status FROM applications WHERE id=?").get(h.applicationId),
+    ).toMatchObject({ status: "APPROVED" });
+  } finally {
+    await h.close();
+  }
+});
 
 it("모델 의견만으로 대출을 만들지 않고 사람 승인을 기다린다", async () => {
   const h = await createReviewFixture();
@@ -85,3 +106,60 @@ it("존재하지 않는 근거를 참조한 의견을 거부한다", async () =>
     await h.close();
   }
 });
+it.each(["APPROVE", "REJECT", "REQUEST_INFORMATION"])(
+  "사람의 %s 결정 후 과거 실패 작업은 재시도와 결과 저장을 할 수 없다",
+  async (decision) => {
+    const ai = createTestAi();
+    const run = ai.run;
+    const h = await createReviewFixture(ai);
+    try {
+      ai.run = async () => {
+        throw new DomainError("AI_INVALID_OUTPUT", 502);
+      };
+      await expect(h.runAssessment()).rejects.toThrow("AI_INVALID_OUTPUT");
+      const old = z
+        .object({ id: z.string() })
+        .parse(h.db.prepare("SELECT id FROM jobs WHERE kind='UNDERWRITE'").get());
+      expect(
+        (
+          await h.request(
+            "shop-a",
+            "POST",
+            `/api/jobs/${old.id}/retry`,
+            {},
+            { "idempotency-key": "retry-once" },
+          )
+        ).status,
+      ).toBe(202);
+      ai.run = run;
+      await h.runAssessment();
+      expect((await h.review({ decision })).status).toBe(200);
+      expect(
+        (
+          await h.request(
+            "shop-a",
+            "POST",
+            `/api/jobs/${old.id}/retry`,
+            {},
+            { "idempotency-key": "retry-old" },
+          )
+        ).status,
+      ).toBe(409);
+      enqueue(h.db, {
+        kind: "UNDERWRITE",
+        applicationId: h.applicationId,
+        businessId: "shop-a",
+        consentIds: h.consentIds,
+        modelId: "test-model",
+        referenceId: null,
+      });
+      const late = claim(h.db, Date.now(), ["UNDERWRITE"]);
+      if (!late) throw new Error("Missing late job");
+      await expect(
+        createUnderwriter(h.db, h.clock, ai)(late, new AbortController().signal),
+      ).rejects.toThrow("JOB_OBSOLETE");
+    } finally {
+      await h.close();
+    }
+  },
+);

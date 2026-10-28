@@ -5,9 +5,8 @@ import type { ServerOptions } from "../app.js";
 import { context, requireRole } from "../auth.js";
 import { DomainError } from "../errors.js";
 import { idempotent } from "../transactions.js";
-import { listConsents, authorize } from "../../agents/consent.js";
-import { enqueue, requireActiveConsents } from "../../workflow/queue.js";
-import { consentQuerySchema } from "../../domain/contracts.js";
+import { collectionQueries } from "../../agents/consent.js";
+import { enqueue } from "../../workflow/queue.js";
 
 export const applicationInputSchema = z.object({
   companyName: z.string().min(1).max(100),
@@ -30,7 +29,12 @@ export function applicationRoutes(app: Express, options: ServerOptions) {
   app.post("/api/applications/:id/corrections", (req, res) => {
     const actor = context(req).actor;
     requireRole(actor, ["BORROWER"]);
-    const body = z.object({ fixtureId: z.literal("synthetic-confirmation") }).parse(req.body);
+    const body = z
+      .object({
+        fixtureId: z.literal("synthetic-confirmation"),
+        consentIds: z.array(z.string()).length(3).optional(),
+      })
+      .parse(req.body);
     const raw = options.db
       .prepare("SELECT * FROM applications WHERE id=?")
       .get(z.string().parse(req.params.id));
@@ -48,7 +52,17 @@ export function applicationRoutes(app: Express, options: ServerOptions) {
         if (row.status !== "NEEDS_INFORMATION")
           throw new DomainError("CORRECTION_NOT_REQUESTED", 409);
         const input = applicationInputSchema.parse(JSON.parse(row.payload));
-        requireActiveConsents(options.db, input.consentIds, row.business_id, options.clock.now());
+        input.consentIds = body.consentIds ?? input.consentIds;
+        collectionQueries(
+          options.db,
+          input.consentIds,
+          row.business_id,
+          "ASSESSMENT",
+          options.clock.now(),
+        );
+        options.db
+          .prepare("UPDATE applications SET payload=? WHERE id=?")
+          .run(JSON.stringify(input), row.id);
         options.db
           .prepare(
             "UPDATE jobs SET status='CANCELLED' WHERE application_id=? AND status IN ('QUEUED','RUNNING')",
@@ -83,24 +97,13 @@ export function applicationRoutes(app: Express, options: ServerOptions) {
       body,
       submittedSchema,
       () => {
-        const grants = listConsents(options.db, actor).filter((row) =>
-          body.consentIds.includes(row.id),
+        collectionQueries(
+          options.db,
+          body.consentIds,
+          actor.businessId!,
+          "ASSESSMENT",
+          options.clock.now(),
         );
-        if (
-          grants.length !== 3 ||
-          new Set(grants.map((row) => row.source)).size !== 3 ||
-          grants.some((row) => row.purpose !== "ASSESSMENT")
-        )
-          throw new DomainError("CONSENT_SCOPE", 403);
-        for (const grant of grants)
-          authorize(
-            options.db,
-            consentQuerySchema.parse({
-              ...grant,
-              consentId: grant.id,
-            }),
-            options.clock.now(),
-          );
         const applicationId = randomUUID();
         options.db
           .prepare(

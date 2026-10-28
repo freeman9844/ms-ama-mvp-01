@@ -9,6 +9,7 @@ import {
   type Actor,
   type ConsentProof,
   type ConsentQuery,
+  type Purpose,
 } from "../domain/contracts.js";
 import type { Clock } from "../domain/clock.js";
 import { requireRole } from "../server/auth.js";
@@ -102,6 +103,43 @@ export function listConsents(db: DatabaseSync, actor: Actor) {
       ...consentInputSchema.parse(JSON.parse(row.payload)),
     };
   });
+}
+
+export function collectionQueries(
+  db: DatabaseSync,
+  ids: string[],
+  businessId: string,
+  purpose: Purpose,
+  now: Date,
+): ConsentQuery[] {
+  const start = new Date(now.getTime() + 9 * 3_600_000);
+  const day = start.getUTCDate();
+  start.setUTCDate(1);
+  start.setUTCMonth(start.getUTCMonth() - 6);
+  const last = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).getUTCDate();
+  start.setUTCDate(Math.min(day, last));
+  const from = new Date(start.getTime() - 9 * 3_600_000).toISOString();
+  const queries = ids.map((id) => {
+    const raw = db.prepare("SELECT payload FROM consents WHERE id=?").get(id);
+    if (!raw) throw new DomainError("CONSENT_INACTIVE", 403);
+    const consent = consentInputSchema.parse(
+      JSON.parse(z.object({ payload: z.string() }).parse(raw).payload),
+    );
+    const query = consentQuerySchema.parse({
+      consentId: id,
+      businessId,
+      purpose,
+      source: consent.source,
+      resourceIds: [`${consent.source.toLowerCase()}-${businessId}`],
+      from,
+      to: now.toISOString(),
+    });
+    authorize(db, query, now);
+    return query;
+  });
+  if (queries.length !== 3 || new Set(queries.map((q) => q.source)).size !== 3)
+    throw new DomainError("CONSENT_SCOPE", 403);
+  return queries;
 }
 
 function blockConsent(db: DatabaseSync, id: string, status: "REVOKED" | "EXPIRED") {

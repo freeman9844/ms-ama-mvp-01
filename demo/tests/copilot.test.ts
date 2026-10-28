@@ -9,6 +9,57 @@ import { tmpdir } from "node:os";
 import { EventEmitter, once } from "node:events";
 import { setImmediate } from "node:timers/promises";
 import { z } from "zod";
+import { claim, enqueue, fail } from "../src/workflow/queue.js";
+
+it.each([
+  ["query", 503, undefined, true],
+  ["rate_limit", 429, "rate_limited", true],
+  ["authentication", 401, undefined, false],
+  ["policy", 503, undefined, false],
+  ["rate_limit", 429, "user_weekly_rate_limited", false],
+] as const)(
+  "SDK %s/%s 오류의 명시적 메타데이터로만 최대 두 번 시도한다",
+  async (errorType, statusCode, errorCode, retryable) => {
+    const fake = createFakeRuntime();
+    const create = fake.runtime.createSession;
+    fake.runtime.createSession = async (config) => ({
+      ...(await create(config)),
+      async sendAndWait() {
+        config.onEvent?.({
+          type: "session.error",
+          id: "error-event",
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          data: { errorType, statusCode, errorCode, message: "Synthetic service error" },
+        });
+        throw new Error("Synthetic service error");
+      },
+    });
+    const ai = createAi({ db, root, runtime: fake.runtime, authorize() {} });
+    const id = enqueue(db, {
+      kind: "SUPPORT",
+      applicationId: null,
+      businessId: "shop-a",
+      consentIds: [],
+      modelId: "test-model",
+      referenceId: null,
+    });
+    for (let i = 0; i < (retryable ? 2 : 1); i++) {
+      const job = claim(db, Date.now() + i * 2000);
+      if (!job) throw new Error("Missing retry");
+      try {
+        await ai.run({ ...request, jobId: id }, signal());
+      } catch (error) {
+        fail(db, job, error);
+      }
+      expect(db.prepare("SELECT status FROM jobs WHERE id=?").get(id)).toMatchObject({
+        status: retryable && i === 0 ? "QUEUED" : "FAILED",
+      });
+    }
+    expect(claim(db, Date.now() + 10000)).toBeNull();
+    expect(fake.deleted).toHaveLength(retryable ? 2 : 1);
+  },
+);
 
 let db: ReturnType<typeof openDb>;
 let root: string;

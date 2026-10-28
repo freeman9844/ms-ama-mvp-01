@@ -17,6 +17,33 @@ export type AiOptions = {
   authorize(request: AiRequest): void;
   runtime?: SdkRuntime;
 };
+function sdkFailure(error: unknown): unknown {
+  if (error instanceof DomainError) return error;
+  const metadata = z
+    .object({
+      statusCode: z.number().optional(),
+      errorType: z.string().optional(),
+      errorCode: z.string().optional(),
+    })
+    .safeParse(error);
+  if (!metadata.success) return error;
+  const { statusCode, errorType, errorCode } = metadata.data;
+  if (statusCode === undefined && errorType === undefined) return error;
+  const permanent = [
+    "authentication",
+    "authorization",
+    "policy",
+    "quota",
+    "context_limit",
+  ].includes(errorType ?? "");
+  const transient =
+    !permanent &&
+    ([500, 502, 503, 504].includes(statusCode ?? 0) ||
+      (statusCode === 429 &&
+        errorType === "rate_limit" &&
+        ["rate_limited", "integration_rate_limited"].includes(errorCode ?? "")));
+  return new DomainError(transient ? "AI_TRANSIENT" : "AI_SERVICE_ERROR", 502);
+}
 export function createAi(options: AiOptions): AiPort {
   const runtimeRoot = join(options.root, "runtime");
   const dataRoot = join(options.root, "copilot");
@@ -57,10 +84,14 @@ export function createAi(options: AiOptions): AiPort {
   }
   const api: AiPort = {
     async listModels() {
-      await ensureStarted();
-      if (!(await runtime.getAuthStatus()).isAuthenticated)
-        throw new DomainError("AI_AUTH_REQUIRED", 503);
-      return runtime.listModels();
+      try {
+        await ensureStarted();
+        if (!(await runtime.getAuthStatus()).isAuthenticated)
+          throw new DomainError("AI_AUTH_REQUIRED", 503);
+        return await runtime.listModels();
+      } catch (error) {
+        throw sdkFailure(error);
+      }
     },
     async run(request, signal) {
       if (!request.modelId || request.modelId === "auto") {
@@ -105,6 +136,7 @@ export function createAi(options: AiOptions): AiPort {
       combined.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(() => controller.abort(new DomainError("AI_TIMEOUT", 504)), 120_000);
       let primaryError: unknown;
+      let serviceError: unknown;
       try {
         const tools = toolsFor(options.db, request, (name) => {
           try {
@@ -153,6 +185,8 @@ export function createAi(options: AiOptions): AiPort {
               JSON.stringify(z.toJSONSchema(schema)),
           },
           onEvent(event) {
+            if (event.type === "session.error" && !event.agentId)
+              serviceError = sdkFailure(event.data);
             if (event.type === "assistant.usage") {
               const parsed = z
                 .object({ inputTokens: z.number(), outputTokens: z.number() })
@@ -201,8 +235,14 @@ export function createAi(options: AiOptions): AiPort {
           throw new DomainError("AI_UNKNOWN_EVIDENCE", 502);
         return { text: JSON.stringify(parsed), sessionId: id, modelId: request.modelId, usage };
       } catch (error) {
-        primaryError = error;
-        throw error;
+        primaryError = combined.aborted
+          ? combined.reason
+          : error instanceof DomainError
+            ? error
+            : serviceError instanceof DomainError
+              ? serviceError
+              : sdkFailure(error);
+        throw primaryError;
       } finally {
         clearTimeout(timer);
         combined.removeEventListener("abort", abort);

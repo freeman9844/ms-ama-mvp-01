@@ -4,7 +4,7 @@ import type { ServerOptions } from "../app.js";
 import { context } from "../auth.js";
 import { DomainError } from "../errors.js";
 import { idempotent } from "../transactions.js";
-import { getJob, enqueue, requireActiveConsents } from "../../workflow/queue.js";
+import { getJob, enqueue, requireActiveConsents, assertWorkState } from "../../workflow/queue.js";
 
 export function jobRoutes(app: Express, options: ServerOptions) {
   app.post("/api/jobs/:id/retry", (req, res) => {
@@ -21,7 +21,18 @@ export function jobRoutes(app: Express, options: ServerOptions) {
       {},
       z.object({ jobId: z.string() }),
       () => {
+        const job = getJob(options.db, z.string().parse(req.params.id));
         if (job.status !== "FAILED") throw new DomainError("JOB_NOT_RETRYABLE", 409);
+        assertWorkState(options.db, job);
+        if (
+          job.kind !== "MONITOR" &&
+          options.db
+            .prepare(
+              "SELECT 1 FROM jobs WHERE kind=? AND application_id IS ? AND reference_id IS ? AND rowid>(SELECT rowid FROM jobs WHERE id=?)",
+            )
+            .get(job.kind, job.applicationId, job.referenceId, job.id)
+        )
+          throw new DomainError("JOB_OBSOLETE", 409);
         if (job.kind !== "DELETE")
           requireActiveConsents(options.db, job.consentIds, job.businessId, options.clock.now());
         const setting = options.db.prepare("SELECT value FROM settings WHERE key='model_id'").get();
@@ -29,6 +40,7 @@ export function jobRoutes(app: Express, options: ServerOptions) {
           ? z.object({ value: z.string() }).parse(setting).value
           : job.modelId;
         const jobId = enqueue(options.db, { ...job, modelId });
+        options.db.prepare("UPDATE jobs SET status='CANCELLED' WHERE id=?").run(job.id);
         if (job.kind === "DELETE")
           options.db
             .prepare(
