@@ -143,6 +143,7 @@ export function assertJob(db: DatabaseSync, job: Job, now: Date): void {
   const raw = db.prepare("SELECT * FROM jobs WHERE id=?").get(job.id);
   if (!raw) throw new DomainError("JOB_INVALIDATED", 409);
   const row = rowSchema.parse(raw);
+  if (row.status === "BLOCKED_BY_CONSENT") throw new DomainError("CONSENT_INACTIVE", 403);
   if (
     row.status !== "RUNNING" ||
     row.claim_token !== job.claimToken ||

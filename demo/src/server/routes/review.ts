@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { z } from "zod";
 import { review, reviewInputSchema } from "../../agents/underwriting.js";
-import { readDataset } from "../../agents/assembly.js";
+import { readAuthorizedDataset } from "../../agents/assembly.js";
 import { assessmentSchema } from "../../copilot/schemas.js";
 import type { ServerOptions } from "../app.js";
 import { context, requireRole } from "../auth.js";
@@ -37,7 +37,7 @@ export function reviewRoutes(app: Express, options: ServerOptions) {
       .object({ dataset_id: z.string().nullable(), assessment_id: z.string().nullable() })
       .parse(raw);
     if (!app.dataset_id || !app.assessment_id) throw new DomainError("ASSESSMENT_NOT_READY", 409);
-    const data = readDataset(options.db, app.dataset_id);
+    const data = readAuthorizedDataset(options.db, options.clock, app.dataset_id);
     const saved = options.db
       .prepare("SELECT payload,version FROM assessments WHERE id=? AND status='VALID'")
       .get(app.assessment_id);

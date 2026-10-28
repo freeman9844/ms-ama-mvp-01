@@ -28,7 +28,14 @@ export function jobRoutes(app: Express, options: ServerOptions) {
         const modelId = setting
           ? z.object({ value: z.string() }).parse(setting).value
           : job.modelId;
-        return { jobId: enqueue(options.db, { ...job, modelId }) };
+        const jobId = enqueue(options.db, { ...job, modelId });
+        if (job.kind === "DELETE")
+          options.db
+            .prepare(
+              "UPDATE deletion_requests SET state='PENDING',error_code=NULL,job_id=? WHERE consent_id=?",
+            )
+            .run(jobId, job.referenceId);
+        return { jobId };
       },
     );
     res.status(202).json(result);

@@ -140,6 +140,7 @@ export function applicationRoutes(app: Express, options: ServerOptions) {
           id: row.id,
           status: row.status,
           createdAt: row.created_at,
+          evidenceDeleted: row.dataset_version > 0 && row.dataset_id === null,
           ...applicationInputSchema.parse(JSON.parse(row.payload)),
         };
       }),
@@ -159,6 +160,7 @@ export function applicationRoutes(app: Express, options: ServerOptions) {
       status: row.status,
       datasetVersion: row.dataset_version,
       assessmentVersion: row.assessment_version,
+      evidenceDeleted: row.dataset_version > 0 && row.dataset_id === null,
       ...applicationInputSchema.parse(JSON.parse(row.payload)),
     });
   });

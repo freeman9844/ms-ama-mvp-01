@@ -6,6 +6,9 @@ import type { AiRequest } from "../src/copilot/port.js";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { EventEmitter, once } from "node:events";
+import { setImmediate } from "node:timers/promises";
+import { z } from "zod";
 
 let db: ReturnType<typeof openDb>;
 let root: string;
@@ -26,6 +29,37 @@ const request: AiRequest = {
   prompt: "합성 상환 지원 요청",
 };
 const signal = () => new AbortController().signal;
+
+it("세션 생성 도중 삭제는 생성 완료·실행 중단을 기다리며 다시 살아나는 세션을 남기지 않는다", async () => {
+  const fake = createFakeRuntime();
+  const create = fake.runtime.createSession;
+  const events = new EventEmitter();
+  const started = once(events, "started");
+  const finish = once(events, "finish");
+  fake.runtime.createSession = async (config) => {
+    events.emit("started");
+    await finish;
+    return create(config);
+  };
+  const ai = createAi({ db, root, runtime: fake.runtime, authorize() {} });
+  const running = ai.run(request, signal());
+  await started;
+  const { id } = z.object({ id: z.string() }).parse(db.prepare("SELECT id FROM ai_sessions").get());
+  let deleted = false;
+  const deleting = ai.deleteSession(id).then(() => {
+    deleted = true;
+  });
+  await setImmediate();
+  const prematurelyDeleted = deleted;
+  events.emit("finish");
+  const results = await Promise.allSettled([running, deleting]);
+  expect(prematurelyDeleted).toBe(false);
+  expect(results[0]?.status).toBe("rejected");
+  expect(results[1]?.status).toBe("fulfilled");
+  expect(db.prepare("SELECT state FROM ai_sessions WHERE id=?").get(id)).toMatchObject({
+    state: "DELETED",
+  });
+});
 
 it("모델 미선택은 기본 모델로 대체하지 않는다", async () => {
   const fake = createFakeRuntime();

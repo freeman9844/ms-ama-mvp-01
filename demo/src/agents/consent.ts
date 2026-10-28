@@ -13,6 +13,8 @@ import {
 import type { Clock } from "../domain/clock.js";
 import { requireRole } from "../server/auth.js";
 import { DomainError } from "../server/errors.js";
+import { transaction } from "../server/transactions.js";
+import { enqueue } from "../workflow/queue.js";
 
 export const consentInputSchema = z
   .object({
@@ -100,4 +102,69 @@ export function listConsents(db: DatabaseSync, actor: Actor) {
       ...consentInputSchema.parse(JSON.parse(row.payload)),
     };
   });
+}
+
+function blockConsent(db: DatabaseSync, id: string, status: "REVOKED" | "EXPIRED") {
+  return transaction(db, () => {
+    const row = consentRowSchema.parse(db.prepare("SELECT * FROM consents WHERE id=?").get(id));
+    const existing = db.prepare("SELECT job_id FROM deletion_requests WHERE consent_id=?").get(id);
+    if (existing) return z.object({ job_id: z.string() }).parse(existing).job_id;
+    db.prepare("UPDATE consents SET status=?,version=version+1 WHERE id=?").run(status, id);
+    db.prepare(
+      "UPDATE datasets SET validation_status='INVALIDATED' WHERE id IN (SELECT dataset_id FROM dataset_consents WHERE consent_id=?)",
+    ).run(id);
+    db.prepare(
+      "UPDATE jobs SET status='BLOCKED_BY_CONSENT',error_code='CONSENT_INACTIVE' WHERE kind<>'DELETE' AND status IN ('QUEUED','RUNNING') AND EXISTS(SELECT 1 FROM json_each(jobs.consent_ids) WHERE value=?)",
+    ).run(id);
+    const jobId = enqueue(db, {
+      kind: "DELETE",
+      applicationId: null,
+      businessId: row.business_id,
+      consentIds: [id],
+      modelId: "",
+      referenceId: id,
+    });
+    db.prepare("INSERT INTO deletion_requests VALUES (?,?,'PENDING',NULL)").run(id, jobId);
+    return jobId;
+  });
+}
+
+export function revokeConsent(db: DatabaseSync, clock: Clock, actor: Actor, consentId: string) {
+  requireRole(actor, ["BORROWER"]);
+  const raw = db.prepare("SELECT * FROM consents WHERE id=?").get(consentId);
+  if (!raw) throw new DomainError("NOT_FOUND", 404);
+  const row = consentRowSchema.parse(raw);
+  if (row.business_id !== actor.businessId) throw new DomainError("FORBIDDEN", 403);
+  const deletionJobId = blockConsent(db, consentId, "REVOKED");
+  db.prepare("INSERT OR IGNORE INTO audit_events VALUES (?,?,?,'CONSENT_BLOCKED',?,NULL)").run(
+    `revoke-${consentId}`,
+    clock.now().toISOString(),
+    actor.id,
+    consentId,
+  );
+  return { access: "BLOCKED" as const, deletionJobId };
+}
+
+export function expireConsents(db: DatabaseSync, clock: Clock): number {
+  const expired = db
+    .prepare("SELECT id,payload FROM consents WHERE status='ACTIVE'")
+    .all()
+    .map((raw) => z.object({ id: z.string(), payload: z.string() }).parse(raw))
+    .filter(
+      (row) =>
+        Date.parse(consentInputSchema.parse(JSON.parse(row.payload)).validUntil) <=
+        clock.now().getTime(),
+    );
+  for (const row of expired) blockConsent(db, row.id, "EXPIRED");
+  return expired.length;
+}
+
+export function startConsentSweeper(db: DatabaseSync, clock: Clock) {
+  expireConsents(db, clock);
+  const timer = setInterval(() => expireConsents(db, clock), 1_000);
+  return {
+    stop() {
+      clearInterval(timer);
+    },
+  };
 }

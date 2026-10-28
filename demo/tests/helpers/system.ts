@@ -39,15 +39,14 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
   const url = `http://127.0.0.1:${address.port}`;
   options.origin = url;
   const sourceDb = openSourceDb(join(directory, "source.db"));
-  const mockServer = createServer(
-    createMockApp({
-      db: sourceDb,
-      clock,
-      serviceToken,
-      appUrl: url,
-      setTime: clock.set,
-    }),
-  );
+  const mockOptions = {
+    db: sourceDb,
+    clock,
+    serviceToken,
+    appUrl: url,
+    setTime: clock.set,
+  };
+  const mockServer = createServer(createMockApp(mockOptions));
   mockServer.listen(0, "127.0.0.1");
   await once(mockServer, "listening");
   const mockAddress = mockServer.address();
@@ -72,6 +71,7 @@ export async function startTestSystem(services: { ai?: AiPort } = {}) {
     clock,
     serviceToken,
     mockUrl,
+    mockOptions,
     sourceDb,
     sourceRequest(source: string, query: unknown, cursor: string | null) {
       const paths: Record<string, string> = {

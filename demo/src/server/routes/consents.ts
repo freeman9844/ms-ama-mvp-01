@@ -1,8 +1,16 @@
 import type { Express } from "express";
-import { authorize, grantConsent, listConsents } from "../../agents/consent.js";
+import {
+  authorize,
+  grantConsent,
+  listConsents,
+  revokeConsent,
+  consentInputSchema,
+} from "../../agents/consent.js";
 import { consentQuerySchema } from "../../domain/contracts.js";
 import type { ServerOptions } from "../app.js";
 import { context, serviceAuthentication } from "../auth.js";
+import { z } from "zod";
+import { DomainError } from "../errors.js";
 
 export function internalConsentRoutes(app: Express, options: ServerOptions) {
   app.post(
@@ -14,6 +22,44 @@ export function internalConsentRoutes(app: Express, options: ServerOptions) {
   );
 }
 export function consentRoutes(app: Express, options: ServerOptions) {
+  app.post("/api/consents/:id/revoke", (req, res) => {
+    res
+      .status(202)
+      .json(
+        revokeConsent(
+          options.db,
+          options.clock,
+          context(req).actor,
+          z.string().parse(req.params.id),
+        ),
+      );
+  });
+  app.get("/api/consents/:id/deletion", (req, res) => {
+    const id = z.string().parse(req.params.id);
+    const raw = options.db.prepare("SELECT * FROM consents WHERE id=?").get(id);
+    if (!raw) throw new DomainError("NOT_FOUND", 404);
+    const consent = z
+      .object({ business_id: z.string(), status: z.string(), payload: z.string() })
+      .parse(raw);
+    const actor = context(req).actor;
+    if (actor.role === "BORROWER" && actor.businessId !== consent.business_id)
+      throw new DomainError("FORBIDDEN", 403);
+    const blocked =
+      consent.status !== "ACTIVE" ||
+      Date.parse(consentInputSchema.parse(JSON.parse(consent.payload)).validUntil) <=
+        options.clock.now().getTime();
+    const deletion = options.db
+      .prepare("SELECT state,error_code,job_id FROM deletion_requests WHERE consent_id=?")
+      .get(id);
+    res.json({
+      access: blocked ? "BLOCKED" : "ACTIVE",
+      ...(deletion
+        ? z
+            .object({ state: z.string(), error_code: z.string().nullable(), job_id: z.string() })
+            .parse(deletion)
+        : { state: blocked ? "PENDING" : "NOT_REQUESTED", error_code: null, job_id: null }),
+    });
+  });
   app.post("/api/consents", (req, res) => {
     res.status(201).json(grantConsent(options.db, options.clock, context(req).actor, req.body));
   });

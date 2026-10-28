@@ -194,3 +194,9 @@ CREATE TABLE IF NOT EXISTS mock_messages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS message_daily_limit
   ON mock_messages(application_id,business_date) WHERE state='SENT';
+CREATE TABLE IF NOT EXISTS deletion_requests (
+  consent_id TEXT PRIMARY KEY REFERENCES consents(id),
+  job_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  error_code TEXT
+);

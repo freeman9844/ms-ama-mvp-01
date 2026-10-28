@@ -6,7 +6,7 @@ import { context, requireRole } from "../auth.js";
 import { DomainError, handler } from "../errors.js";
 import { transaction } from "../transactions.js";
 import { enqueue, generation } from "../../workflow/queue.js";
-import { consentInputSchema } from "../../agents/consent.js";
+import { consentInputSchema, expireConsents } from "../../agents/consent.js";
 import { submitSupport } from "../../agents/collections.js";
 
 export function enqueueMonitoring(options: ServerOptions) {
@@ -133,6 +133,7 @@ export function eventRoutes(app: Express, options: ServerOptions) {
         if (state.state === "APPLIED") return;
         db.prepare("INSERT OR REPLACE INTO settings VALUES ('demo_time',?)").run(result.nextTime);
         options.setTime!(new Date(result.nextTime));
+        expireConsents(db, clock);
         if (event.type === "MISSED_PAYMENT" || event.type === "PAYMENT_RECEIVED") {
           db.prepare("UPDATE repayment_schedules SET status=?,version=version+1 WHERE id=?").run(
             event.type === "MISSED_PAYMENT" ? "MISSED" : "PAID",

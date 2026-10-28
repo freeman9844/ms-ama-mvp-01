@@ -3,6 +3,7 @@ import { CopilotClient, ToolSet, type SessionConfig } from "@github/copilot-sdk"
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { EventEmitter, once } from "node:events";
 import { z } from "zod";
 import { DomainError } from "../server/errors.js";
 import { readDataset } from "../agents/assembly.js";
@@ -33,14 +34,32 @@ export function createAi(options: AiOptions): AiPort {
       await mkdir(runtimeRoot, { recursive: true });
       await mkdir(dataRoot, { recursive: true });
       await runtime.start();
-      if (!(await runtime.getAuthStatus()).isAuthenticated) {
-        throw new DomainError("AI_AUTH_REQUIRED", 503);
-      }
     })());
-  const active = new Map<string, SdkSession>();
+  const inFlight = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  async function deleteOwnedSession(id: string) {
+    const raw = options.db.prepare("SELECT state FROM ai_sessions WHERE id=?").get(id);
+    if (!raw) throw new DomainError("SESSION_NOT_OWNED", 403);
+    if (z.object({ state: z.string() }).parse(raw).state === "DELETED") return;
+    try {
+      await ensureStarted();
+      await runtime.deleteSession(id);
+      options.db
+        .prepare("UPDATE ai_sessions SET state='DELETED',error_code=NULL WHERE id=?")
+        .run(id);
+    } catch (error) {
+      options.db
+        .prepare(
+          "UPDATE ai_sessions SET state='CLEANUP_FAILED',error_code='AI_CLEANUP_FAILED' WHERE id=?",
+        )
+        .run(id);
+      throw error;
+    }
+  }
   const api: AiPort = {
     async listModels() {
       await ensureStarted();
+      if (!(await runtime.getAuthStatus()).isAuthenticated)
+        throw new DomainError("AI_AUTH_REQUIRED", 503);
       return runtime.listModels();
     },
     async run(request, signal) {
@@ -70,6 +89,8 @@ export function createAi(options: AiOptions): AiPort {
       let calls = 0;
       let usage: AiResult["usage"] = null;
       const controller = new AbortController();
+      const completion = new EventEmitter();
+      inFlight.set(id, { controller, done: once(completion, "finished").then(() => undefined) });
       const combined = AbortSignal.any([signal, controller.signal]);
       const abort = () => {
         if (session)
@@ -143,7 +164,6 @@ export function createAi(options: AiOptions): AiPort {
           },
         };
         session = await runtime.createSession(config);
-        active.set(id, session);
         options.db.prepare("UPDATE ai_sessions SET state='RUNNING' WHERE id=?").run(id);
         combined.throwIfAborted();
         const message = await session.sendAndWait({ prompt: request.prompt }, 120_000);
@@ -181,26 +201,35 @@ export function createAi(options: AiOptions): AiPort {
         combined.removeEventListener("abort", abort);
         const cleanupErrors: unknown[] = [];
         try {
+          if (session && combined.aborted) await session.abort();
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
+        try {
           if (session) await session.disconnect();
         } catch (error) {
           cleanupErrors.push(error);
         }
-        active.delete(id);
         try {
-          await api.deleteSession(id);
+          await deleteOwnedSession(id);
         } catch (error) {
           cleanupErrors.push(error);
         }
-        if (cleanupErrors.length) {
-          options.db
-            .prepare(
-              "UPDATE ai_sessions SET state='CLEANUP_FAILED', error_code='AI_CLEANUP_FAILED' WHERE id=?",
-            )
-            .run(id);
-          throw new AggregateError(
-            primaryError === undefined ? cleanupErrors : [primaryError, ...cleanupErrors],
-            "AI_CLEANUP_FAILED",
-          );
+        try {
+          if (cleanupErrors.length) {
+            options.db
+              .prepare(
+                "UPDATE ai_sessions SET state='CLEANUP_FAILED', error_code='AI_CLEANUP_FAILED' WHERE id=?",
+              )
+              .run(id);
+            throw new AggregateError(
+              primaryError === undefined ? cleanupErrors : [primaryError, ...cleanupErrors],
+              "AI_CLEANUP_FAILED",
+            );
+          }
+        } finally {
+          inFlight.delete(id);
+          completion.emit("finished");
         }
       }
     },
@@ -208,20 +237,12 @@ export function createAi(options: AiOptions): AiPort {
       if (!options.db.prepare("SELECT id FROM ai_sessions WHERE id=?").get(id)) {
         throw new DomainError("SESSION_NOT_OWNED", 403);
       }
-      try {
-        await active.get(id)?.abort();
-        await runtime.deleteSession(id);
-        options.db
-          .prepare("UPDATE ai_sessions SET state='DELETED', error_code=NULL WHERE id=?")
-          .run(id);
-      } catch (error) {
-        options.db
-          .prepare(
-            "UPDATE ai_sessions SET state='CLEANUP_FAILED', error_code='AI_CLEANUP_FAILED' WHERE id=?",
-          )
-          .run(id);
-        throw error;
+      const pending = inFlight.get(id);
+      if (pending) {
+        pending.controller.abort(new DomainError("CONSENT_INACTIVE", 403));
+        await pending.done;
       }
+      await deleteOwnedSession(id);
     },
     async stop() {
       if (!starting) return;

@@ -21,6 +21,7 @@ import { addKrw } from "../domain/money.js";
 import { authorize } from "./consent.js";
 import { DomainError } from "../server/errors.js";
 import { assertJob, type Job } from "../workflow/queue.js";
+import { requireActiveConsents } from "../workflow/queue.js";
 
 export type DatasetRef = { id: string; version: number; consentIds: string[] };
 export type AssemblyInput = {
@@ -227,4 +228,29 @@ export function readDataset(db: DatabaseSync, id: string): Dataset {
     ...z.record(z.string(), z.unknown()).parse(JSON.parse(payload)),
     records,
   });
+}
+
+export function readAuthorizedDataset(db: DatabaseSync, clock: Clock, id: string): Dataset {
+  const raw = db.prepare("SELECT business_id FROM datasets WHERE id=?").get(id);
+  if (!raw) throw new DomainError("DATASET_UNAVAILABLE", 404);
+  const { business_id } = z.object({ business_id: z.string() }).parse(raw);
+  const lineage = db
+    .prepare(
+      "SELECT d.consent_id,d.consent_version,c.version FROM dataset_consents d JOIN consents c ON c.id=d.consent_id WHERE d.dataset_id=?",
+    )
+    .all(id)
+    .map((raw) =>
+      z
+        .object({ consent_id: z.string(), consent_version: z.number(), version: z.number() })
+        .parse(raw),
+    );
+  if (!lineage.length || lineage.some((row) => row.consent_version !== row.version))
+    throw new DomainError("CONSENT_INACTIVE", 403);
+  requireActiveConsents(
+    db,
+    lineage.map((row) => row.consent_id),
+    business_id,
+    clock.now(),
+  );
+  return readDataset(db, id);
 }
