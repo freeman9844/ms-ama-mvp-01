@@ -6,6 +6,8 @@ import { DomainError, errorHandler } from "./errors.js";
 import { consentRoutes, internalConsentRoutes } from "./routes/consents.js";
 import type { AiPort } from "../copilot/port.js";
 import { aiRoutes } from "./routes/ai.js";
+import { applicationRoutes } from "./routes/applications.js";
+import { jobRoutes } from "./routes/jobs.js";
 
 export type ServerOptions = {
   db: DatabaseSync;
@@ -46,6 +48,8 @@ export function createApp(options: ServerOptions) {
   app.use("/api", authentication(options.db));
   consentRoutes(app, options);
   aiRoutes(app, options);
+  applicationRoutes(app, options);
+  jobRoutes(app, options);
   app.get("/api/me", (req, res) => {
     const { actor, csrf } = context(req);
     res.json({ actor, csrf });

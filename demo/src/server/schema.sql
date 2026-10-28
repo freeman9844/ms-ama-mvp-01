@@ -72,3 +72,40 @@ CREATE TABLE IF NOT EXISTS tool_events (
   state TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+INSERT OR IGNORE INTO settings VALUES ('generation', '1');
+CREATE TABLE IF NOT EXISTS applications (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  status TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  dataset_id TEXT,
+  dataset_version INTEGER NOT NULL DEFAULT 0,
+  assessment_id TEXT,
+  assessment_version INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  application_id TEXT REFERENCES applications(id),
+  business_id TEXT NOT NULL REFERENCES businesses(id),
+  consent_ids TEXT NOT NULL,
+  generation INTEGER NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  claim_token TEXT NOT NULL DEFAULT '',
+  model_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  lease_until_ms INTEGER NOT NULL DEFAULT 0,
+  retry_at_ms INTEGER NOT NULL DEFAULT 0,
+  result_id TEXT,
+  error_code TEXT,
+  reference_id TEXT
+);
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  actor_id TEXT NOT NULL,
+  route TEXT NOT NULL,
+  key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  response TEXT NOT NULL,
+  PRIMARY KEY(actor_id, route, key)
+);

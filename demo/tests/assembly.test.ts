@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { z } from "zod";
 import {
-  collect,
+  collect as collectStaged,
   readDataset,
   type AssemblyInput,
   type SourceClient,
@@ -9,6 +9,13 @@ import {
 import { consentQuerySchema, sourcePageSchema } from "../src/domain/contracts.js";
 import { startTestSystem } from "./helpers/system.js";
 import { consentInput } from "./helpers/consent.js";
+import { claim, complete } from "../src/workflow/queue.js";
+
+const collect: typeof collectStaged = async (db, clock, source, input, signal) => {
+  const ref = await collectStaged(db, clock, source, input, signal);
+  if (!complete(db, input.job, ref.id, clock.now())) throw new Error("Job completion rejected");
+  return ref;
+};
 
 let h: Awaited<ReturnType<typeof startTestSystem>>;
 let input: AssemblyInput;
@@ -26,8 +33,23 @@ beforeEach(async () => {
     const { id } = z.object({ id: z.string() }).parse(grant.body);
     queries.push(consentQuerySchema.parse({ ...grantBody, consentId: id, businessId: "shop-a" }));
   }
+  const submitted = await h.request(
+    "shop-a",
+    "POST",
+    "/api/applications",
+    {
+      companyName: "합성 가게 A",
+      requestedAmountKrw: 10_000_000,
+      consentIds: queries.map((query) => query.consentId),
+    },
+    { "idempotency-key": "assembly-fixture" },
+  );
+  const { applicationId } = z.object({ applicationId: z.string() }).parse(submitted.body);
+  const job = claim(h.db, Date.now());
+  if (!job) throw new Error("Missing fixture job");
   input = {
-    applicationId: "application-a",
+    job,
+    applicationId,
     businessId: "shop-a",
     purpose: "ASSESSMENT",
     queries,

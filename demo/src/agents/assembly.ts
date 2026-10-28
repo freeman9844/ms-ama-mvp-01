@@ -19,9 +19,11 @@ import {
 import { addKrw } from "../domain/money.js";
 import { authorize } from "./consent.js";
 import { DomainError } from "../server/errors.js";
+import { assertJob, type Job } from "../workflow/queue.js";
 
 export type DatasetRef = { id: string; version: number; consentIds: string[] };
 export type AssemblyInput = {
+  job: Job;
   applicationId: string;
   businessId: string;
   purpose: Purpose;
@@ -54,6 +56,7 @@ export async function collect(
   input: AssemblyInput,
   signal: AbortSignal,
 ): Promise<DatasetRef> {
+  assertJob(db, input.job, clock.now());
   if (
     input.queries.length !== 3 ||
     new Set(input.queries.map((q) => q.source)).size !== 3 ||
@@ -73,6 +76,7 @@ export async function collect(
     const byId = new Map<string, SourceRecord>();
     do {
       signal.throwIfAborted();
+      assertJob(db, input.job, clock.now());
       authorize(db, query, clock.now());
       const page = sourcePageSchema.parse(await source.page(query, cursor));
       if (!first) first = page;
@@ -144,6 +148,7 @@ export async function collect(
   signal.throwIfAborted();
   db.exec("BEGIN IMMEDIATE");
   try {
+    assertJob(db, input.job, clock.now());
     input.queries.forEach((query, index) => {
       const proof = authorize(db, query, clock.now());
       if (proof.version !== proofs[index]?.version) throw new DomainError("CONSENT_CHANGED", 403);
@@ -173,7 +178,7 @@ export async function collect(
       scheduledFlows: flows,
     };
     const { records: sourceRecords, ...metadata } = result;
-    db.prepare("INSERT INTO datasets VALUES (?, ?, ?, ?, 'VALID', ?)").run(
+    db.prepare("INSERT INTO datasets VALUES (?, ?, ?, ?, 'STAGED', ?)").run(
       result.id,
       input.applicationId,
       input.businessId,
